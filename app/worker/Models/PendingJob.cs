@@ -1,8 +1,9 @@
 namespace LetterTranslation.Worker.Models;
 
 public record PendingJob(
-    string UserId,
     string JobDirectoryPath,
     Guid JobId,
-    string JobName
+    string JobName,
+    string? ProjectId,
+    string? CreatedByUserId
 );

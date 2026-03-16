@@ -17,6 +17,7 @@ public class JobsControllerTests
 {
     private readonly Mock<IUserService> _userServiceMock;
     private readonly Mock<IDataService> _dataServiceMock;
+    private readonly Mock<IProjectService> _projectServiceMock;
     private readonly Mock<ILogger<JobsController>> _loggerMock;
     private readonly JobsController _controller;
 
@@ -24,9 +25,10 @@ public class JobsControllerTests
     {
         _userServiceMock = new Mock<IUserService>();
         _dataServiceMock = new Mock<IDataService>();
+        _projectServiceMock = new Mock<IProjectService>();
         _loggerMock = new Mock<ILogger<JobsController>>();
 
-        _controller = new JobsController(_userServiceMock.Object, _dataServiceMock.Object, _loggerMock.Object);
+        _controller = new JobsController(_userServiceMock.Object, _dataServiceMock.Object, _projectServiceMock.Object, _loggerMock.Object);
     }
 
     private void SetUserContext(string email, string nameIdentifier)

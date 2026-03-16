@@ -19,6 +19,8 @@ const logout = () => {
       <div class="topbar-inner">
         <router-link to="/dashboard" class="topbar-brand">Letter Translator</router-link>
         <div class="topbar-actions">
+          <router-link to="/dashboard" class="nav-link">My Jobs</router-link>
+          <router-link to="/projects" class="nav-link">Projects</router-link>
           <router-link to="/new-job" class="btn btn-primary btn-sm">+ New Job</router-link>
           <button @click="logout" class="btn btn-secondary btn-sm">Log Out</button>
           <button @click="themeStore.toggle()" class="theme-toggle" title="Toggle dark mode">
@@ -71,6 +73,22 @@ const logout = () => {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.nav-link {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  text-decoration: none;
+  padding: 4px 8px;
+  border-radius: var(--radius-md);
+  transition: color 0.15s ease;
+}
+.nav-link:hover {
+  color: var(--color-text);
+}
+.nav-link.router-link-active {
+  color: var(--color-primary);
 }
 
 .btn-sm {

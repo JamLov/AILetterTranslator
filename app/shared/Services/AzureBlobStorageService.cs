@@ -126,6 +126,58 @@ public class AzureBlobStorageService : IStorageService
         _logger.LogInformation("Wrote file stream to blob '{Path}'", path);
     }
 
+    public async Task MoveDirectoryAsync(string sourcePath, string destinationPath)
+    {
+        var sourcePrefix = NormalizePath(sourcePath).TrimEnd('/') + "/";
+        var destPrefix = NormalizePath(destinationPath).TrimEnd('/') + "/";
+
+        var blobsToDelete = new List<BlobClient>();
+
+        await foreach (var blobItem in _containerClient.GetBlobsAsync(prefix: sourcePrefix))
+        {
+            var relativePath = blobItem.Name[sourcePrefix.Length..];
+            var destBlobPath = destPrefix + relativePath;
+
+            var sourceBlob = _containerClient.GetBlobClient(blobItem.Name);
+            var destBlob = _containerClient.GetBlobClient(destBlobPath);
+
+            await destBlob.StartCopyFromUriAsync(sourceBlob.Uri);
+
+            // Wait for copy to complete
+            BlobProperties properties;
+            do
+            {
+                properties = (await destBlob.GetPropertiesAsync()).Value;
+                if (properties.CopyStatus == CopyStatus.Failed)
+                    throw new InvalidOperationException($"Copy failed for blob '{blobItem.Name}': {properties.CopyStatusDescription}");
+            } while (properties.CopyStatus == CopyStatus.Pending);
+
+            blobsToDelete.Add(sourceBlob);
+        }
+
+        foreach (var blob in blobsToDelete)
+        {
+            await blob.DeleteIfExistsAsync();
+        }
+
+        _logger.LogInformation("Moved directory from '{Source}' to '{Destination}' ({Count} blobs)", sourcePath, destinationPath, blobsToDelete.Count);
+    }
+
+    public async Task DeleteDirectoryAsync(string path)
+    {
+        var prefix = NormalizePath(path).TrimEnd('/') + "/";
+        var count = 0;
+
+        await foreach (var blobItem in _containerClient.GetBlobsAsync(prefix: prefix))
+        {
+            var blobClient = _containerClient.GetBlobClient(blobItem.Name);
+            await blobClient.DeleteIfExistsAsync();
+            count++;
+        }
+
+        _logger.LogInformation("Deleted directory '{Path}' ({Count} blobs)", path, count);
+    }
+
     public async Task DeleteFileAsync(string path)
     {
         var blobClient = _containerClient.GetBlobClient(NormalizePath(path));

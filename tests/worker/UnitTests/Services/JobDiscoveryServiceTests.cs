@@ -27,15 +27,23 @@ public class JobDiscoveryServiceTests
         _sut = new JobDiscoveryService(_storageMock.Object, _config, _loggerMock.Object);
     }
 
-    private string UserDir(string userId) => Path.Combine(_dataPath, userId);
-    private string UserDataDir(string userId) => Path.Combine(_dataPath, userId, "data");
-    private string JobDir(string userId, Guid jobId) => Path.Combine(_dataPath, userId, "data", jobId.ToString());
-    private string MetadataPath(string userId, Guid jobId) => Path.Combine(_dataPath, userId, "data", jobId.ToString(), "metadata.json");
+    private string UsersPath => Path.Combine(_dataPath, "users");
+    private string ProjectsPath => Path.Combine(_dataPath, "projects");
+    private string UserDir(string userId) => Path.Combine(_dataPath, "users", userId);
+    private string UserJobsDir(string userId) => Path.Combine(_dataPath, "users", userId, "jobs");
+    private string JobDir(string userId, Guid jobId) => Path.Combine(_dataPath, "users", userId, "jobs", jobId.ToString());
+    private string MetadataPath(string userId, Guid jobId) => Path.Combine(_dataPath, "users", userId, "jobs", jobId.ToString(), "metadata.json");
+
+    private void SetupNoProjects()
+    {
+        _storageMock.Setup(s => s.DirectoryExistsAsync(ProjectsPath)).ReturnsAsync(false);
+    }
 
     [Fact]
-    public async Task FindPendingJobsAsync_WhenDataPathDoesNotExist_ReturnsEmpty()
+    public async Task FindPendingJobsAsync_WhenUsersPathDoesNotExist_ReturnsEmpty()
     {
-        _storageMock.Setup(s => s.DirectoryExistsAsync(_dataPath)).ReturnsAsync(false);
+        _storageMock.Setup(s => s.DirectoryExistsAsync(UsersPath)).ReturnsAsync(false);
+        SetupNoProjects();
 
         var result = await _sut.FindPendingJobsAsync();
 
@@ -45,8 +53,9 @@ public class JobDiscoveryServiceTests
     [Fact]
     public async Task FindPendingJobsAsync_WhenNoUserDirectories_ReturnsEmpty()
     {
-        _storageMock.Setup(s => s.DirectoryExistsAsync(_dataPath)).ReturnsAsync(true);
-        _storageMock.Setup(s => s.GetDirectoriesAsync(_dataPath)).ReturnsAsync(Enumerable.Empty<string>());
+        _storageMock.Setup(s => s.DirectoryExistsAsync(UsersPath)).ReturnsAsync(true);
+        _storageMock.Setup(s => s.GetDirectoriesAsync(UsersPath)).ReturnsAsync(Enumerable.Empty<string>());
+        SetupNoProjects();
 
         var result = await _sut.FindPendingJobsAsync();
 
@@ -54,11 +63,12 @@ public class JobDiscoveryServiceTests
     }
 
     [Fact]
-    public async Task FindPendingJobsAsync_WhenUserHasNoDataDirectory_SkipsUser()
+    public async Task FindPendingJobsAsync_WhenUserHasNoJobsDirectory_SkipsUser()
     {
-        _storageMock.Setup(s => s.DirectoryExistsAsync(_dataPath)).ReturnsAsync(true);
-        _storageMock.Setup(s => s.GetDirectoriesAsync(_dataPath)).ReturnsAsync(new[] { UserDir("user1") });
-        _storageMock.Setup(s => s.DirectoryExistsAsync(UserDataDir("user1"))).ReturnsAsync(false);
+        _storageMock.Setup(s => s.DirectoryExistsAsync(UsersPath)).ReturnsAsync(true);
+        _storageMock.Setup(s => s.GetDirectoriesAsync(UsersPath)).ReturnsAsync(new[] { UserDir("user1") });
+        _storageMock.Setup(s => s.DirectoryExistsAsync(UserJobsDir("user1"))).ReturnsAsync(false);
+        SetupNoProjects();
 
         var result = await _sut.FindPendingJobsAsync();
 
@@ -78,19 +88,20 @@ public class JobDiscoveryServiceTests
         };
         var metadataJson = JsonSerializer.Serialize(metadata);
 
-        _storageMock.Setup(s => s.DirectoryExistsAsync(_dataPath)).ReturnsAsync(true);
-        _storageMock.Setup(s => s.GetDirectoriesAsync(_dataPath)).ReturnsAsync(new[] { UserDir("user1") });
-        _storageMock.Setup(s => s.DirectoryExistsAsync(UserDataDir("user1"))).ReturnsAsync(true);
-        _storageMock.Setup(s => s.GetDirectoriesAsync(UserDataDir("user1"))).ReturnsAsync(new[] { JobDir("user1", jobId) });
+        _storageMock.Setup(s => s.DirectoryExistsAsync(UsersPath)).ReturnsAsync(true);
+        _storageMock.Setup(s => s.GetDirectoriesAsync(UsersPath)).ReturnsAsync(new[] { UserDir("user1") });
+        _storageMock.Setup(s => s.DirectoryExistsAsync(UserJobsDir("user1"))).ReturnsAsync(true);
+        _storageMock.Setup(s => s.GetDirectoriesAsync(UserJobsDir("user1"))).ReturnsAsync(new[] { JobDir("user1", jobId) });
         _storageMock.Setup(s => s.FileExistsAsync(MetadataPath("user1", jobId))).ReturnsAsync(true);
         _storageMock.Setup(s => s.ReadTextAsync(MetadataPath("user1", jobId))).ReturnsAsync(metadataJson);
+        SetupNoProjects();
 
         var result = await _sut.FindPendingJobsAsync();
 
         result.Should().HaveCount(1);
         result[0].JobId.Should().Be(jobId);
         result[0].JobName.Should().Be("Test Job");
-        result[0].UserId.Should().Be("user1");
+        result[0].ProjectId.Should().BeNull();
     }
 
     [Fact]
@@ -106,12 +117,13 @@ public class JobDiscoveryServiceTests
         };
         var metadataJson = JsonSerializer.Serialize(metadata);
 
-        _storageMock.Setup(s => s.DirectoryExistsAsync(_dataPath)).ReturnsAsync(true);
-        _storageMock.Setup(s => s.GetDirectoriesAsync(_dataPath)).ReturnsAsync(new[] { UserDir("user1") });
-        _storageMock.Setup(s => s.DirectoryExistsAsync(UserDataDir("user1"))).ReturnsAsync(true);
-        _storageMock.Setup(s => s.GetDirectoriesAsync(UserDataDir("user1"))).ReturnsAsync(new[] { JobDir("user1", jobId) });
+        _storageMock.Setup(s => s.DirectoryExistsAsync(UsersPath)).ReturnsAsync(true);
+        _storageMock.Setup(s => s.GetDirectoriesAsync(UsersPath)).ReturnsAsync(new[] { UserDir("user1") });
+        _storageMock.Setup(s => s.DirectoryExistsAsync(UserJobsDir("user1"))).ReturnsAsync(true);
+        _storageMock.Setup(s => s.GetDirectoriesAsync(UserJobsDir("user1"))).ReturnsAsync(new[] { JobDir("user1", jobId) });
         _storageMock.Setup(s => s.FileExistsAsync(MetadataPath("user1", jobId))).ReturnsAsync(true);
         _storageMock.Setup(s => s.ReadTextAsync(MetadataPath("user1", jobId))).ReturnsAsync(metadataJson);
+        SetupNoProjects();
 
         var result = await _sut.FindPendingJobsAsync();
 
@@ -131,12 +143,13 @@ public class JobDiscoveryServiceTests
         };
         var metadataJson = JsonSerializer.Serialize(metadata);
 
-        _storageMock.Setup(s => s.DirectoryExistsAsync(_dataPath)).ReturnsAsync(true);
-        _storageMock.Setup(s => s.GetDirectoriesAsync(_dataPath)).ReturnsAsync(new[] { UserDir("user1") });
-        _storageMock.Setup(s => s.DirectoryExistsAsync(UserDataDir("user1"))).ReturnsAsync(true);
-        _storageMock.Setup(s => s.GetDirectoriesAsync(UserDataDir("user1"))).ReturnsAsync(new[] { JobDir("user1", jobId) });
+        _storageMock.Setup(s => s.DirectoryExistsAsync(UsersPath)).ReturnsAsync(true);
+        _storageMock.Setup(s => s.GetDirectoriesAsync(UsersPath)).ReturnsAsync(new[] { UserDir("user1") });
+        _storageMock.Setup(s => s.DirectoryExistsAsync(UserJobsDir("user1"))).ReturnsAsync(true);
+        _storageMock.Setup(s => s.GetDirectoriesAsync(UserJobsDir("user1"))).ReturnsAsync(new[] { JobDir("user1", jobId) });
         _storageMock.Setup(s => s.FileExistsAsync(MetadataPath("user1", jobId))).ReturnsAsync(true);
         _storageMock.Setup(s => s.ReadTextAsync(MetadataPath("user1", jobId))).ReturnsAsync(metadataJson);
+        SetupNoProjects();
 
         var result = await _sut.FindPendingJobsAsync();
 
@@ -146,15 +159,16 @@ public class JobDiscoveryServiceTests
     [Fact]
     public async Task FindPendingJobsAsync_HandlesCorruptMetadataGracefully()
     {
-        var badJobDir = Path.Combine(_dataPath, "user1", "data", "bad-job");
+        var badJobDir = Path.Combine(_dataPath, "users", "user1", "jobs", "bad-job");
         var badMetadataPath = Path.Combine(badJobDir, "metadata.json");
 
-        _storageMock.Setup(s => s.DirectoryExistsAsync(_dataPath)).ReturnsAsync(true);
-        _storageMock.Setup(s => s.GetDirectoriesAsync(_dataPath)).ReturnsAsync(new[] { UserDir("user1") });
-        _storageMock.Setup(s => s.DirectoryExistsAsync(UserDataDir("user1"))).ReturnsAsync(true);
-        _storageMock.Setup(s => s.GetDirectoriesAsync(UserDataDir("user1"))).ReturnsAsync(new[] { badJobDir });
+        _storageMock.Setup(s => s.DirectoryExistsAsync(UsersPath)).ReturnsAsync(true);
+        _storageMock.Setup(s => s.GetDirectoriesAsync(UsersPath)).ReturnsAsync(new[] { UserDir("user1") });
+        _storageMock.Setup(s => s.DirectoryExistsAsync(UserJobsDir("user1"))).ReturnsAsync(true);
+        _storageMock.Setup(s => s.GetDirectoriesAsync(UserJobsDir("user1"))).ReturnsAsync(new[] { badJobDir });
         _storageMock.Setup(s => s.FileExistsAsync(badMetadataPath)).ReturnsAsync(true);
         _storageMock.Setup(s => s.ReadTextAsync(badMetadataPath)).ReturnsAsync("not valid json");
+        SetupNoProjects();
 
         var result = await _sut.FindPendingJobsAsync();
 
@@ -169,23 +183,25 @@ public class JobDiscoveryServiceTests
         var metadata1 = JsonSerializer.Serialize(new JobMetadata { JobId = jobId1, JobName = "Job 1", Status = "Not Started" });
         var metadata2 = JsonSerializer.Serialize(new JobMetadata { JobId = jobId2, JobName = "Job 2", Status = "Not Started" });
 
-        _storageMock.Setup(s => s.DirectoryExistsAsync(_dataPath)).ReturnsAsync(true);
-        _storageMock.Setup(s => s.GetDirectoriesAsync(_dataPath)).ReturnsAsync(new[] { UserDir("user1"), UserDir("user2") });
+        _storageMock.Setup(s => s.DirectoryExistsAsync(UsersPath)).ReturnsAsync(true);
+        _storageMock.Setup(s => s.GetDirectoriesAsync(UsersPath)).ReturnsAsync(new[] { UserDir("user1"), UserDir("user2") });
 
-        _storageMock.Setup(s => s.DirectoryExistsAsync(UserDataDir("user1"))).ReturnsAsync(true);
-        _storageMock.Setup(s => s.GetDirectoriesAsync(UserDataDir("user1"))).ReturnsAsync(new[] { JobDir("user1", jobId1) });
+        _storageMock.Setup(s => s.DirectoryExistsAsync(UserJobsDir("user1"))).ReturnsAsync(true);
+        _storageMock.Setup(s => s.GetDirectoriesAsync(UserJobsDir("user1"))).ReturnsAsync(new[] { JobDir("user1", jobId1) });
         _storageMock.Setup(s => s.FileExistsAsync(MetadataPath("user1", jobId1))).ReturnsAsync(true);
         _storageMock.Setup(s => s.ReadTextAsync(MetadataPath("user1", jobId1))).ReturnsAsync(metadata1);
 
-        _storageMock.Setup(s => s.DirectoryExistsAsync(UserDataDir("user2"))).ReturnsAsync(true);
-        _storageMock.Setup(s => s.GetDirectoriesAsync(UserDataDir("user2"))).ReturnsAsync(new[] { JobDir("user2", jobId2) });
+        _storageMock.Setup(s => s.DirectoryExistsAsync(UserJobsDir("user2"))).ReturnsAsync(true);
+        _storageMock.Setup(s => s.GetDirectoriesAsync(UserJobsDir("user2"))).ReturnsAsync(new[] { JobDir("user2", jobId2) });
         _storageMock.Setup(s => s.FileExistsAsync(MetadataPath("user2", jobId2))).ReturnsAsync(true);
         _storageMock.Setup(s => s.ReadTextAsync(MetadataPath("user2", jobId2))).ReturnsAsync(metadata2);
+
+        SetupNoProjects();
 
         var result = await _sut.FindPendingJobsAsync();
 
         result.Should().HaveCount(2);
-        result.Should().Contain(j => j.UserId == "user1" && j.JobId == jobId1);
-        result.Should().Contain(j => j.UserId == "user2" && j.JobId == jobId2);
+        result.Should().Contain(j => j.JobId == jobId1);
+        result.Should().Contain(j => j.JobId == jobId2);
     }
 }

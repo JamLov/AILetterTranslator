@@ -13,6 +13,8 @@ public class JobDiscoveryService : IJobDiscoveryService
     private readonly IConfiguration _config;
     private readonly ILogger<JobDiscoveryService> _logger;
 
+    private static readonly JsonSerializerOptions ReadOptions = new() { PropertyNameCaseInsensitive = true };
+
     public JobDiscoveryService(IStorageService storageService, IConfiguration config, ILogger<JobDiscoveryService> logger)
     {
         _storageService = storageService;
@@ -25,54 +27,75 @@ public class JobDiscoveryService : IJobDiscoveryService
         var dataStoragePath = _config["DataStoragePath"] ?? "data";
         _logger.LogInformation("Scanning for pending jobs in {DataStoragePath}", dataStoragePath);
 
-        if (!await _storageService.DirectoryExistsAsync(dataStoragePath))
-        {
-            _logger.LogWarning("Data storage path does not exist: {DataStoragePath}", dataStoragePath);
-            return [];
-        }
-
         var pendingJobs = new List<PendingJob>();
-        var userDirectories = await _storageService.GetDirectoriesAsync(dataStoragePath);
 
-        _logger.LogInformation("Found {Count} user directory(ies) to scan", userDirectories.Count());
-
-        foreach (var userDir in userDirectories)
+        // Scan standalone jobs: /data/users/*/jobs/*/metadata.json
+        var usersPath = Path.Combine(dataStoragePath, "users");
+        if (await _storageService.DirectoryExistsAsync(usersPath))
         {
-            var userId = Path.GetFileName(userDir);
-            var userDataPath = Path.Combine(userDir, "data");
+            var userDirectories = await _storageService.GetDirectoriesAsync(usersPath);
+            _logger.LogInformation("Found {Count} user directory(ies) to scan", userDirectories.Count());
 
-            if (!await _storageService.DirectoryExistsAsync(userDataPath))
-                continue;
-
-            var jobDirectories = await _storageService.GetDirectoriesAsync(userDataPath);
-            _logger.LogInformation("User {UserId}: scanning {Count} job directory(ies)", userId, jobDirectories.Count());
-
-            foreach (var jobDir in jobDirectories)
+            foreach (var userDir in userDirectories)
             {
-                var metadataPath = Path.Combine(jobDir, "metadata.json");
+                var jobsPath = Path.Combine(userDir, "jobs");
+                if (!await _storageService.DirectoryExistsAsync(jobsPath)) continue;
 
-                if (!await _storageService.FileExistsAsync(metadataPath))
-                    continue;
-
-                try
-                {
-                    var json = await _storageService.ReadTextAsync(metadataPath);
-                    var metadata = JsonSerializer.Deserialize<JobMetadata>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-
-                    if (metadata != null && metadata.Status == "Not Started")
-                    {
-                        pendingJobs.Add(new PendingJob(userId, jobDir, metadata.JobId, metadata.JobName));
-                        _logger.LogInformation("Found pending job {JobId} ({JobName}) for user {UserId}", metadata.JobId, metadata.JobName, userId);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "Failed to read metadata from {MetadataPath}", metadataPath);
-                }
+                var found = await ScanJobDirectoriesAsync(jobsPath, projectId: null);
+                pendingJobs.AddRange(found);
             }
         }
 
-        _logger.LogInformation("Found {Count} pending job(s)", pendingJobs.Count);
+        // Scan project jobs: /data/projects/*/jobs/*/metadata.json
+        var projectsPath = Path.Combine(dataStoragePath, "projects");
+        if (await _storageService.DirectoryExistsAsync(projectsPath))
+        {
+            var projectDirectories = await _storageService.GetDirectoriesAsync(projectsPath);
+            _logger.LogInformation("Found {Count} project directory(ies) to scan", projectDirectories.Count());
+
+            foreach (var projectDir in projectDirectories)
+            {
+                var projectId = Path.GetFileName(projectDir);
+                var jobsPath = Path.Combine(projectDir, "jobs");
+                if (!await _storageService.DirectoryExistsAsync(jobsPath)) continue;
+
+                var found = await ScanJobDirectoriesAsync(jobsPath, projectId);
+                pendingJobs.AddRange(found);
+            }
+        }
+
+        _logger.LogInformation("Found {Count} pending job(s) total", pendingJobs.Count);
         return pendingJobs;
+    }
+
+    private async Task<List<PendingJob>> ScanJobDirectoriesAsync(string jobsPath, string? projectId)
+    {
+        var results = new List<PendingJob>();
+        var jobDirectories = await _storageService.GetDirectoriesAsync(jobsPath);
+
+        foreach (var jobDir in jobDirectories)
+        {
+            var metadataPath = Path.Combine(jobDir, "metadata.json");
+            if (!await _storageService.FileExistsAsync(metadataPath)) continue;
+
+            try
+            {
+                var json = await _storageService.ReadTextAsync(metadataPath);
+                var metadata = JsonSerializer.Deserialize<JobMetadata>(json, ReadOptions);
+
+                if (metadata != null && metadata.Status == "Not Started")
+                {
+                    results.Add(new PendingJob(jobDir, metadata.JobId, metadata.JobName, projectId, metadata.CreatedByUserId));
+                    _logger.LogInformation("Found pending job {JobId} ({JobName}), project: {ProjectId}",
+                        metadata.JobId, metadata.JobName, projectId ?? "standalone");
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to read metadata from {MetadataPath}", metadataPath);
+            }
+        }
+
+        return results;
     }
 }

@@ -85,6 +85,34 @@ public class LocalDiskStorageService : IStorageService
         return await File.ReadAllBytesAsync(path);
     }
 
+    public Task MoveDirectoryAsync(string sourcePath, string destinationPath)
+    {
+        var destinationParent = Path.GetDirectoryName(destinationPath);
+        if (!string.IsNullOrEmpty(destinationParent) && !Directory.Exists(destinationParent))
+        {
+            Directory.CreateDirectory(destinationParent);
+        }
+
+        Directory.Move(sourcePath, destinationPath);
+        _logger.LogInformation("Moved directory from {Source} to {Destination}", sourcePath, destinationPath);
+        return Task.CompletedTask;
+    }
+
+    public Task DeleteDirectoryAsync(string path)
+    {
+        if (Directory.Exists(path))
+        {
+            Directory.Delete(path, recursive: true);
+            _logger.LogInformation("Deleted directory at {Path}", path);
+        }
+        else
+        {
+            _logger.LogDebug("Directory not found for deletion at {Path}", path);
+        }
+
+        return Task.CompletedTask;
+    }
+
     public async Task WriteFileAsync(string path, Stream content)
     {
         var directory = Path.GetDirectoryName(path);

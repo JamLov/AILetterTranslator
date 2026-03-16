@@ -17,7 +17,8 @@ builder.Host.UseSerilog();
 builder.Services.AddControllers();
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddScoped<IUserService, UserService>();
-builder.Services.AddScoped<IDataService, DataService>(); // Register the Business Logic DataService
+builder.Services.AddScoped<IDataService, DataService>();
+builder.Services.AddScoped<IProjectService, ProjectService>();
 
 // Register Storage Service based on config
 var storageProvider = builder.Configuration["StorageProvider"];

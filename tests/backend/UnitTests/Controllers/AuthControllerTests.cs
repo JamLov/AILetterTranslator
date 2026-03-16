@@ -56,7 +56,7 @@ public class AuthControllerTests
         objectResult.StatusCode.Should().Be(StatusCodes.Status403Forbidden);
         
         // Ensure data service wasn't called
-        _dataServiceMock.Verify(s => s.InitializeUserWorkspaceAsync(It.IsAny<string>()), Times.Never);
+        _dataServiceMock.Verify(s => s.InitializeUserWorkspaceAsync(It.IsAny<string>(), It.IsAny<string?>()), Times.Never);
     }
 
     [Fact]
@@ -74,7 +74,7 @@ public class AuthControllerTests
         badRequestResult.StatusCode.Should().Be(StatusCodes.Status400BadRequest);
         
         // Ensure data service wasn't called
-        _dataServiceMock.Verify(s => s.InitializeUserWorkspaceAsync(It.IsAny<string>()), Times.Never);
+        _dataServiceMock.Verify(s => s.InitializeUserWorkspaceAsync(It.IsAny<string>(), It.IsAny<string?>()), Times.Never);
     }
 
     [Fact]
@@ -85,7 +85,7 @@ public class AuthControllerTests
         var userId = "google-user-123";
         SetUserContext(email, userId);
         _userServiceMock.Setup(s => s.IsUserAllowed(email)).Returns(true);
-        _dataServiceMock.Setup(s => s.InitializeUserWorkspaceAsync(userId)).Returns(Task.CompletedTask);
+        _dataServiceMock.Setup(s => s.InitializeUserWorkspaceAsync(userId, It.IsAny<string?>())).Returns(Task.CompletedTask);
 
         // Act
         var result = await _controller.LoginAsync();
@@ -95,7 +95,7 @@ public class AuthControllerTests
         okResult.StatusCode.Should().Be(StatusCodes.Status200OK);
         
         // Verify the workspace was initialized
-        _dataServiceMock.Verify(s => s.InitializeUserWorkspaceAsync(userId), Times.Once);
+        _dataServiceMock.Verify(s => s.InitializeUserWorkspaceAsync(userId, email), Times.Once);
     }
 
     [Fact]
@@ -107,7 +107,7 @@ public class AuthControllerTests
         SetUserContext(email, userId);
         _userServiceMock.Setup(s => s.IsUserAllowed(email)).Returns(true);
         
-        _dataServiceMock.Setup(s => s.InitializeUserWorkspaceAsync(userId))
+        _dataServiceMock.Setup(s => s.InitializeUserWorkspaceAsync(userId, It.IsAny<string?>()))
             .ThrowsAsync(new Exception("Disk full"));
 
         // Act

@@ -15,6 +15,7 @@ public class JobsController : ControllerBase
 {
     private readonly IUserService _userService;
     private readonly IDataService _dataService;
+    private readonly IProjectService _projectService;
     private readonly ILogger<JobsController> _logger;
 
     private const int MaxJobNameLength = 250;
@@ -22,10 +23,11 @@ public class JobsController : ControllerBase
     private const long MaxFileSizeBytes = 4 * 1024 * 1024; // 4 MB
     private readonly string[] AllowedContentTypes = { "image/jpeg", "image/png" };
 
-    public JobsController(IUserService userService, IDataService dataService, ILogger<JobsController> logger)
+    public JobsController(IUserService userService, IDataService dataService, IProjectService projectService, ILogger<JobsController> logger)
     {
         _userService = userService;
         _dataService = dataService;
+        _projectService = projectService;
         _logger = logger;
     }
 
@@ -163,5 +165,52 @@ public class JobsController : ControllerBase
             _logger.LogError(ex, "Failed to create job for user {UserId}", userId);
             return StatusCode(StatusCodes.Status500InternalServerError, new { error = "InternalServerError", message = "An error occurred while creating the job." });
         }
+    }
+
+    [HttpPatch("{jobId}/metadata")]
+    public async Task<IActionResult> UpdateJobMetadataAsync(Guid jobId, [FromBody] UpdateJobMetadataRequest request)
+    {
+        var subClaim = User.FindFirst(ClaimTypes.NameIdentifier) ?? User.FindFirst("sub");
+        var userId = subClaim?.Value;
+
+        if (string.IsNullOrEmpty(userId))
+            return BadRequest(new { error = "InvalidToken", message = "Could not extract user ID from token." });
+
+        if (request.LetterDate != null && !DateOnly.TryParse(request.LetterDate, out _))
+            return BadRequest(new { error = "InvalidRequest", message = "LetterDate must be a valid date in YYYY-MM-DD format." });
+
+        var result = await _dataService.UpdateJobLetterDateAsync(userId, jobId, request.LetterDate);
+        if (!result) return NotFound();
+        return NoContent();
+    }
+
+    [HttpPost("{jobId}/move-to-project/{projectId}")]
+    public async Task<IActionResult> MoveToProjectAsync(Guid jobId, Guid projectId)
+    {
+        var subClaim = User.FindFirst(ClaimTypes.NameIdentifier) ?? User.FindFirst("sub");
+        var userId = subClaim?.Value;
+
+        if (string.IsNullOrEmpty(userId))
+            return BadRequest(new { error = "InvalidToken", message = "Could not extract user ID from token." });
+
+        var result = await _projectService.MoveJobToProjectAsync(userId, jobId, projectId);
+        if (!result)
+            return NotFound(new { error = "NotFound", message = "Job or project not found, or you are not the project owner." });
+
+        return NoContent();
+    }
+
+    [HttpDelete("{jobId}")]
+    public async Task<IActionResult> DeleteJobAsync(Guid jobId)
+    {
+        var subClaim = User.FindFirst(ClaimTypes.NameIdentifier) ?? User.FindFirst("sub");
+        var userId = subClaim?.Value;
+
+        if (string.IsNullOrEmpty(userId))
+            return BadRequest(new { error = "InvalidToken", message = "Could not extract user ID from token." });
+
+        var result = await _dataService.DeleteJobAsync(userId, jobId);
+        if (!result) return NotFound();
+        return NoContent();
     }
 }

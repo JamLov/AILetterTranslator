@@ -3,5 +3,6 @@ namespace LetterTranslation.Worker.Models;
 public record GeminiResult(
     string TranscribedMarkdown,
     string TranslatedMarkdown,
-    string TranslatedWithNotesMarkdown
+    string TranslatedWithNotesMarkdown,
+    string? LetterDate = null
 );

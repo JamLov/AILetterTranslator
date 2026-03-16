@@ -29,7 +29,7 @@ public class JobProcessorServiceTests
     }
 
     private PendingJob CreatePendingJob() =>
-        new("user1", _jobDir, _jobId, "Test Job");
+        new(_jobDir, _jobId, "Test Job", null, null);
 
     private void SetupMetadata()
     {

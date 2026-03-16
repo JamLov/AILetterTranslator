@@ -50,7 +50,7 @@ public class DataServiceTests
         var service = CreateService(config);
         var userId = "test-user-id";
 
-        var expectedPath = Path.Combine("/custom/data/path", userId, "data");
+        var expectedPath = Path.Combine("/custom/data/path", "users", userId, "jobs");
 
         // Act
         await service.InitializeUserWorkspaceAsync(userId);
@@ -68,7 +68,7 @@ public class DataServiceTests
         var service = CreateService(config);
         var userId = "test-user-id";
 
-        var expectedPath = Path.Combine("data", userId, "data");
+        var expectedPath = Path.Combine("data", "users", userId, "jobs");
 
         // Act
         await service.InitializeUserWorkspaceAsync(userId);
@@ -231,7 +231,7 @@ public class DataServiceTests
     {
         // Arrange
         var service = CreateService();
-        var userJobsPath = Path.Combine("data", "user-1", "data");
+        var userJobsPath = Path.Combine("data", "users", "user-1", "jobs");
 
         _storageServiceMock.Setup(s => s.DirectoryExistsAsync(userJobsPath)).ReturnsAsync(true);
         _storageServiceMock.Setup(s => s.GetDirectoriesAsync(userJobsPath))
@@ -270,7 +270,7 @@ public class DataServiceTests
     {
         // Arrange
         var service = CreateService();
-        var userJobsPath = Path.Combine("data", "user-1", "data");
+        var userJobsPath = Path.Combine("data", "users", "user-1", "jobs");
 
         _storageServiceMock.Setup(s => s.DirectoryExistsAsync(userJobsPath)).ReturnsAsync(true);
         _storageServiceMock.Setup(s => s.GetDirectoriesAsync(userJobsPath))
@@ -290,7 +290,7 @@ public class DataServiceTests
     {
         // Arrange
         var service = CreateService();
-        var userJobsPath = Path.Combine("data", "user-1", "data");
+        var userJobsPath = Path.Combine("data", "users", "user-1", "jobs");
 
         _storageServiceMock.Setup(s => s.DirectoryExistsAsync(userJobsPath)).ReturnsAsync(true);
         _storageServiceMock.Setup(s => s.GetDirectoriesAsync(userJobsPath))
@@ -358,7 +358,7 @@ public class DataServiceTests
         // Arrange
         var service = CreateService();
         var jobId = Guid.NewGuid();
-        var jobPath = Path.Combine("data", "user-1", "data", jobId.ToString());
+        var jobPath = Path.Combine("data", "users", "user-1", "jobs", jobId.ToString());
 
         var metadata = new JobMetadata
         {
@@ -413,7 +413,7 @@ public class DataServiceTests
         // Arrange
         var service = CreateService();
         var jobId = Guid.NewGuid();
-        var jobPath = Path.Combine("data", "user-1", "data", jobId.ToString());
+        var jobPath = Path.Combine("data", "users", "user-1", "jobs", jobId.ToString());
 
         var metadata = new JobMetadata
         {
@@ -455,7 +455,7 @@ public class DataServiceTests
         // Arrange
         var service = CreateService();
         var jobId = Guid.NewGuid();
-        var jobPath = Path.Combine("data", "user-1", "data", jobId.ToString());
+        var jobPath = Path.Combine("data", "users", "user-1", "jobs", jobId.ToString());
 
         var metadata = new JobMetadata
         {
@@ -503,7 +503,7 @@ public class DataServiceTests
     {
         var service = CreateService();
         var jobId = Guid.NewGuid();
-        var jobPath = Path.Combine("data", "user-1", "data", jobId.ToString());
+        var jobPath = Path.Combine("data", "users", "user-1", "jobs", jobId.ToString());
         var metadataPath = Path.Combine(jobPath, "metadata.json");
 
         var metadata = new JobMetadata
@@ -528,7 +528,7 @@ public class DataServiceTests
     {
         var service = CreateService();
         var jobId = Guid.NewGuid();
-        var jobPath = Path.Combine("data", "user-1", "data", jobId.ToString());
+        var jobPath = Path.Combine("data", "users", "user-1", "jobs", jobId.ToString());
         var metadataPath = Path.Combine(jobPath, "metadata.json");
 
         var metadata = new JobMetadata
@@ -553,7 +553,7 @@ public class DataServiceTests
     {
         var service = CreateService();
         var jobId = Guid.NewGuid();
-        var jobPath = Path.Combine("data", "user-1", "data", jobId.ToString());
+        var jobPath = Path.Combine("data", "users", "user-1", "jobs", jobId.ToString());
         var metadataPath = Path.Combine(jobPath, "metadata.json");
 
         var metadata = new JobMetadata

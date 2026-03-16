@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { api } from '../api';
 
@@ -8,6 +8,7 @@ interface JobMetadata {
   jobName: string;
   createdAt: string;
   status: string;
+  letterDate: string | null;
 }
 
 interface JobDetail {
@@ -19,18 +20,71 @@ interface JobDetail {
   translatedWithNotesHtml: string | null;
 }
 
+interface ProjectSummary {
+  projectId: string;
+  name: string;
+  isOwner: boolean;
+}
+
 const route = useRoute();
 const router = useRouter();
+const projectId = computed(() => route.params.projectId as string | undefined);
 const job = ref<JobDetail | null>(null);
 const isLoading = ref(true);
 const error = ref<string | null>(null);
 const activeTab = ref<'transcribed' | 'translated' | 'contextual'>('transcribed');
+const isProjectOwner = ref(true); // true for standalone jobs (user always owns them)
+const ownedProjects = ref<ProjectSummary[]>([]); // for move-to-project picker
+const selectedMoveProjectId = ref('');
+const isMoving = ref(false);
+const showMetadataDialog = ref(false);
+const editLetterDate = ref('');
+const isSavingMetadata = ref(false);
+
+const openMetadataDialog = () => {
+  editLetterDate.value = job.value?.metadata.letterDate || '';
+  showMetadataDialog.value = true;
+};
+
+const saveMetadata = async () => {
+  if (!job.value) return;
+  isSavingMetadata.value = true;
+  const metadataUrl = projectId.value
+    ? `/api/projects/${projectId.value}/jobs/${job.value.metadata.jobId}/metadata`
+    : `/api/jobs/${job.value.metadata.jobId}/metadata`;
+  try {
+    const res = await api(metadataUrl, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ letterDate: editLetterDate.value || null })
+    });
+    if (res.ok) {
+      job.value.metadata.letterDate = editLetterDate.value || null;
+      showMetadataDialog.value = false;
+    } else {
+      error.value = `Failed to update metadata: ${res.status} ${res.statusText}`;
+    }
+  } catch (err: any) {
+    error.value = `Failed to update metadata: ${err.message}`;
+  } finally {
+    isSavingMetadata.value = false;
+  }
+};
+
+const formatLetterDate = (dateString: string) => {
+  return new Date(dateString + 'T00:00:00').toLocaleDateString(undefined, {
+    year: 'numeric', month: 'long', day: 'numeric'
+  });
+};
 
 onMounted(async () => {
   const jobId = route.params.jobId;
+  const apiUrl = projectId.value
+    ? `/api/projects/${projectId.value}/jobs/${jobId}`
+    : `/api/jobs/${jobId}`;
 
   try {
-    const res = await api(`/api/jobs/${jobId}`);
+    const res = await api(apiUrl);
 
     if (res.ok) {
       job.value = await res.json();
@@ -40,6 +94,22 @@ onMounted(async () => {
       error.value = "The job you are looking for could not be found.";
     } else {
       throw new Error(`Server responded with ${res.status}`);
+    }
+
+    if (projectId.value) {
+      // For project jobs, check if the user is the owner
+      const projectRes = await api(`/api/projects/${projectId.value}`);
+      if (projectRes.ok) {
+        const projectDetail = await projectRes.json();
+        isProjectOwner.value = projectDetail.isOwner;
+      }
+    } else {
+      // For standalone jobs, fetch projects the user owns (for move picker)
+      const projectsRes = await api('/api/projects');
+      if (projectsRes.ok) {
+        const all = await projectsRes.json() as ProjectSummary[];
+        ownedProjects.value = all.filter(p => p.isOwner);
+      }
     }
   } catch (err) {
     error.value = 'An error occurred while fetching the job details.';
@@ -61,8 +131,11 @@ const isResetting = ref(false);
 const resetJob = async () => {
   if (!job.value) return;
   isResetting.value = true;
+  const resetUrl = projectId.value
+    ? `/api/projects/${projectId.value}/jobs/${job.value.metadata.jobId}/reset`
+    : `/api/jobs/${job.value.metadata.jobId}/reset`;
   try {
-    const res = await api(`/api/jobs/${job.value.metadata.jobId}/reset`, {
+    const res = await api(resetUrl, {
       method: 'POST'
     });
     if (res.ok) {
@@ -77,6 +150,46 @@ const resetJob = async () => {
     error.value = `Failed to reset job: ${err.message}`;
   } finally {
     isResetting.value = false;
+  }
+};
+
+const moveToProject = async () => {
+  if (!job.value || !selectedMoveProjectId.value) return;
+  isMoving.value = true;
+  try {
+    const res = await api(`/api/jobs/${job.value.metadata.jobId}/move-to-project/${selectedMoveProjectId.value}`, {
+      method: 'POST'
+    });
+    if (res.ok) {
+      router.push({ name: 'project-job-detail', params: { projectId: selectedMoveProjectId.value, jobId: job.value.metadata.jobId } });
+    } else {
+      const data = await res.json().catch(() => null);
+      error.value = data?.message || `Failed to move job: ${res.status} ${res.statusText}`;
+    }
+  } catch (err: any) {
+    error.value = `Failed to move job: ${err.message}`;
+  } finally {
+    isMoving.value = false;
+  }
+};
+
+const moveToStandalone = async () => {
+  if (!job.value || !projectId.value) return;
+  isMoving.value = true;
+  try {
+    const res = await api(`/api/projects/${projectId.value}/jobs/${job.value.metadata.jobId}/move-to-standalone`, {
+      method: 'POST'
+    });
+    if (res.ok) {
+      router.push({ name: 'job-detail', params: { jobId: job.value.metadata.jobId } });
+    } else {
+      const data = await res.json().catch(() => null);
+      error.value = data?.message || `Failed to move job: ${res.status} ${res.statusText}`;
+    }
+  } catch (err: any) {
+    error.value = `Failed to move job: ${err.message}`;
+  } finally {
+    isMoving.value = false;
   }
 };
 
@@ -103,13 +216,15 @@ const activeHtml = () => {
       <!-- Header -->
       <div class="detail-header">
         <div class="detail-header-left">
-          <button @click="router.push('/dashboard')" class="back-link">&larr; Back to Jobs</button>
+          <button @click="router.push(projectId ? { name: 'project-detail', params: { projectId } } : '/dashboard')" class="back-link">
+            &larr; {{ projectId ? 'Back to Project' : 'Back to Jobs' }}
+          </button>
           <h1 class="detail-title">{{ job.metadata.jobName }}</h1>
           <div class="detail-meta">
             <span>{{ formatDate(job.metadata.createdAt) }}</span>
             <span :class="statusClass(job.metadata.status)">{{ job.metadata.status }}</span>
             <button
-              v-if="job.metadata.status !== 'Not Started' && job.metadata.status !== 'In Progress'"
+              v-if="isProjectOwner && job.metadata.status !== 'Not Started' && job.metadata.status !== 'In Progress'"
               class="btn btn-secondary btn-sm"
               :disabled="isResetting"
               @click="resetJob"
@@ -123,6 +238,45 @@ const activeHtml = () => {
         <!-- Sidebar -->
         <aside class="detail-sidebar">
           <div class="sidebar-block card">
+            <div class="sidebar-heading-row">
+              <h3 class="sidebar-heading">Metadata</h3>
+              <button v-if="isProjectOwner" class="edit-icon-btn" @click="openMetadataDialog" title="Edit metadata">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                  <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                </svg>
+              </button>
+            </div>
+            <div class="metadata-row">
+              <span class="metadata-label">Letter Date</span>
+              <span class="metadata-value">{{ job.metadata.letterDate ? formatLetterDate(job.metadata.letterDate) : 'Unknown' }}</span>
+            </div>
+          </div>
+
+          <!-- Metadata Edit Dialog -->
+          <div v-if="showMetadataDialog" class="dialog-overlay" @click.self="showMetadataDialog = false">
+            <div class="dialog">
+              <h3 class="dialog-title">Edit Metadata</h3>
+              <div class="dialog-field">
+                <label class="dialog-label" for="letterDate">Letter Date</label>
+                <input
+                  id="letterDate"
+                  type="date"
+                  v-model="editLetterDate"
+                  class="dialog-input"
+                  :disabled="isSavingMetadata"
+                />
+              </div>
+              <div class="dialog-actions">
+                <button class="btn btn-secondary btn-sm" @click="showMetadataDialog = false" :disabled="isSavingMetadata">Cancel</button>
+                <button class="btn btn-primary btn-sm" @click="saveMetadata" :disabled="isSavingMetadata">
+                  {{ isSavingMetadata ? 'Saving...' : 'Save' }}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div class="sidebar-block card">
             <h3 class="sidebar-heading">Files</h3>
             <ul class="file-list">
               <li v-for="name in job.originalFileNames" :key="name">{{ name }}</li>
@@ -131,6 +285,30 @@ const activeHtml = () => {
           <div v-if="job.notes" class="sidebar-block card">
             <h3 class="sidebar-heading">Notes</h3>
             <p class="sidebar-text">{{ job.notes }}</p>
+          </div>
+
+          <!-- Move to Project (standalone jobs only) -->
+          <div v-if="!projectId && ownedProjects.length > 0" class="sidebar-block card">
+            <h3 class="sidebar-heading">Move to Project</h3>
+            <select v-model="selectedMoveProjectId" class="move-select" :disabled="isMoving">
+              <option value="" disabled>Select a project...</option>
+              <option v-for="p in ownedProjects" :key="p.projectId" :value="p.projectId">{{ p.name }}</option>
+            </select>
+            <button
+              class="btn btn-secondary btn-sm move-btn"
+              :disabled="!selectedMoveProjectId || isMoving"
+              @click="moveToProject"
+            >{{ isMoving ? 'Moving...' : 'Move' }}</button>
+          </div>
+
+          <!-- Move to Standalone (project jobs, owner only) -->
+          <div v-if="projectId && isProjectOwner" class="sidebar-block card">
+            <h3 class="sidebar-heading">Move Job</h3>
+            <button
+              class="btn btn-secondary btn-sm"
+              :disabled="isMoving"
+              @click="moveToStandalone"
+            >{{ isMoving ? 'Moving...' : 'Move to My Jobs' }}</button>
           </div>
         </aside>
 
@@ -320,5 +498,122 @@ const activeHtml = () => {
   color: var(--color-text-muted);
   padding: 32px 0;
   text-align: center;
+}
+
+.sidebar-heading-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--color-border-light);
+}
+.sidebar-heading-row .sidebar-heading {
+  margin-bottom: 0;
+  padding-bottom: 0;
+  border-bottom: none;
+}
+.edit-icon-btn {
+  background: none;
+  border: none;
+  padding: 4px;
+  cursor: pointer;
+  color: var(--color-text-muted);
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.edit-icon-btn:hover {
+  color: var(--color-primary);
+  background: var(--color-surface-hover, rgba(0,0,0,0.05));
+}
+.metadata-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 13px;
+  padding: 2px 0;
+}
+.metadata-label {
+  color: var(--color-text-muted);
+}
+.metadata-value {
+  color: var(--color-text-secondary);
+  font-weight: 500;
+}
+
+.dialog-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+.dialog {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: 24px;
+  width: 360px;
+  max-width: 90vw;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
+}
+.dialog-title {
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: 20px;
+}
+.dialog-field {
+  margin-bottom: 20px;
+}
+.dialog-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--color-text-muted);
+  margin-bottom: 6px;
+}
+.dialog-input {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  font-size: 14px;
+  font-family: inherit;
+  color: var(--color-text);
+  background: var(--color-surface);
+  box-sizing: border-box;
+}
+.dialog-input:focus {
+  outline: none;
+  border-color: var(--color-primary);
+}
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.move-select {
+  width: 100%;
+  padding: 6px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  font-size: 13px;
+  font-family: inherit;
+  color: var(--color-text);
+  background: var(--color-surface);
+  margin-bottom: 8px;
+}
+.move-btn {
+  width: 100%;
 }
 </style>

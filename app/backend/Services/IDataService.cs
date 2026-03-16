@@ -5,7 +5,11 @@ namespace LetterTranslation.Api.Services;
 
 public interface IDataService
 {
-    Task InitializeUserWorkspaceAsync(string userId);
+    Task InitializeUserWorkspaceAsync(string userId, string? email = null);
+
+    Task<string?> FindUserIdByEmailAsync(string email);
+
+    Task<string?> GetUserEmailAsync(string userId);
 
     Task<JobMetadata> CreateJobAsync(string userId, CreateJobRequest request);
 
@@ -14,5 +18,9 @@ public interface IDataService
     Task<JobDetail?> GetJobDetailAsync(string userId, Guid jobId);
 
     Task<bool> ResetJobAsync(string userId, Guid jobId);
+
+    Task<bool> DeleteJobAsync(string userId, Guid jobId);
+
+    Task<bool> UpdateJobLetterDateAsync(string userId, Guid jobId, string? letterDate);
 }
 

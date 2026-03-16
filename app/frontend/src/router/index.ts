@@ -33,6 +33,42 @@ const router = createRouter({
       name: 'job-detail',
       component: () => import('../views/JobDetailView.vue'),
       meta: { requiresAuth: true }
+    },
+    {
+      path: '/projects',
+      name: 'projects',
+      component: () => import('../views/ProjectsView.vue'),
+      meta: { requiresAuth: true }
+    },
+    {
+      path: '/projects/new',
+      name: 'new-project',
+      component: () => import('../views/NewProjectView.vue'),
+      meta: { requiresAuth: true }
+    },
+    {
+      path: '/projects/:projectId',
+      name: 'project-detail',
+      component: () => import('../views/ProjectDetailView.vue'),
+      meta: { requiresAuth: true }
+    },
+    {
+      path: '/projects/:projectId/edit',
+      name: 'edit-project',
+      component: () => import('../views/EditProjectView.vue'),
+      meta: { requiresAuth: true }
+    },
+    {
+      path: '/projects/:projectId/new-job',
+      name: 'new-project-job',
+      component: () => import('../views/NewJobView.vue'),
+      meta: { requiresAuth: true }
+    },
+    {
+      path: '/projects/:projectId/jobs/:jobId',
+      name: 'project-job-detail',
+      component: () => import('../views/JobDetailView.vue'),
+      meta: { requiresAuth: true }
     }
   ]
 })

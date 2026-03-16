@@ -8,4 +8,6 @@ public class JobMetadata
     public string Status { get; set; } = "Not Started";
     public string? ErrorMessage { get; set; }
     public int OriginalFileCount { get; set; }
+    public string? CreatedByUserId { get; set; }
+    public string? LetterDate { get; set; }
 }

@@ -21,7 +21,7 @@ public class JobProcessorService : IJobProcessorService
 
     public async Task ProcessJobAsync(PendingJob job)
     {
-        _logger.LogInformation("Processing job {JobId} ({JobName}) for user {UserId}", job.JobId, job.JobName, job.UserId);
+        _logger.LogInformation("Processing job {JobId} ({JobName}), project: {ProjectId}", job.JobId, job.JobName, job.ProjectId ?? "standalone");
 
         try
         {
@@ -64,6 +64,12 @@ public class JobProcessorService : IJobProcessorService
             await _storageService.WriteTextAsync(
                 Path.Combine(job.JobDirectoryPath, "Transcribed_Translated_With_Notes.md"),
                 result.TranslatedWithNotesMarkdown);
+
+            if (result.LetterDate != null)
+            {
+                _logger.LogInformation("Job {JobId}: saving extracted letter date {LetterDate}", job.JobId, result.LetterDate);
+                await UpdateJobLetterDateAsync(job.JobDirectoryPath, result.LetterDate);
+            }
 
             _logger.LogInformation("Job {JobId}: setting status to Finished", job.JobId);
             await UpdateJobStatusAsync(job.JobDirectoryPath, "Finished");
@@ -112,5 +118,20 @@ public class JobProcessorService : IJobProcessorService
         await _storageService.WriteTextAsync(metadataPath, updatedJson);
 
         _logger.LogInformation("Updated job status to {Status}", status);
+    }
+
+    private async Task UpdateJobLetterDateAsync(string jobDirectoryPath, string letterDate)
+    {
+        var metadataPath = Path.Combine(jobDirectoryPath, "metadata.json");
+        var json = await _storageService.ReadTextAsync(metadataPath);
+        var metadata = JsonSerializer.Deserialize<JobMetadata>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+
+        if (metadata == null)
+            throw new InvalidOperationException($"Failed to deserialize metadata at {metadataPath}");
+
+        metadata.LetterDate = letterDate;
+
+        var updatedJson = JsonSerializer.Serialize(metadata, new JsonSerializerOptions { WriteIndented = true });
+        await _storageService.WriteTextAsync(metadataPath, updatedJson);
     }
 }

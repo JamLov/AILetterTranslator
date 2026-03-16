@@ -54,7 +54,7 @@ public class JobsControllerTests : IAsyncLifetime
 
         // Verify that the directory and files were created in the temp location
         var subject = _factory.Configuration.GetSection("TestUser")["Subject"];
-        var expectedJobPath = Path.Combine(_factory.TestRootPath, subject, "data", jobMetadata.JobId.ToString());
+        var expectedJobPath = Path.Combine(_factory.TestRootPath, "users", subject, "jobs", jobMetadata.JobId.ToString());
         
         Assert.True(Directory.Exists(expectedJobPath));
         Assert.True(File.Exists(Path.Combine(expectedJobPath, "metadata.json")));

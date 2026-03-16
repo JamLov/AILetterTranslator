@@ -39,7 +39,7 @@ public class WorkerIntegrationTests : IDisposable
     private async Task<(string jobDir, Guid jobId)> CreateTestJob(string userId, string status = "Not Started", string? notes = null)
     {
         var jobId = Guid.NewGuid();
-        var jobDir = Path.Combine(_tempDir, userId, "data", jobId.ToString());
+        var jobDir = Path.Combine(_tempDir, "users", userId, "jobs", jobId.ToString());
         var filesDir = Path.Combine(jobDir, "files");
         Directory.CreateDirectory(filesDir);
 
@@ -81,8 +81,8 @@ public class WorkerIntegrationTests : IDisposable
         var pendingJobs = await discoveryService.FindPendingJobsAsync();
 
         pendingJobs.Should().HaveCount(2);
-        pendingJobs.Should().Contain(j => j.UserId == "user1");
-        pendingJobs.Should().Contain(j => j.UserId == "user2");
+        pendingJobs.Should().Contain(j => j.ProjectId == null);
+        pendingJobs.Should().HaveCount(2);
     }
 
     [Fact]

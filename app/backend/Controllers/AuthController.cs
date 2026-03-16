@@ -52,7 +52,7 @@ public class AuthController : ControllerBase
 
         try
         {
-            await _dataService.InitializeUserWorkspaceAsync(userId);
+            await _dataService.InitializeUserWorkspaceAsync(userId, email);
         }
         catch (Exception ex)
         {

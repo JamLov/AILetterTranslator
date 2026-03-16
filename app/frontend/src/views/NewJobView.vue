@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { ref } from 'vue';
-import { useRouter } from 'vue-router';
+import { ref, computed } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
 import { api } from '../api';
 
+const route = useRoute();
 const router = useRouter();
+const projectId = computed(() => route.params.projectId as string | undefined);
 const jobName = ref('');
 const notes = ref('');
 const selectedFiles = ref<File[]>([]);
@@ -81,13 +83,14 @@ const submitJob = async () => {
   });
 
   try {
-    const res = await api('/api/jobs', {
+    const url = projectId.value ? `/api/projects/${projectId.value}/jobs` : '/api/jobs';
+    const res = await api(url, {
       method: 'POST',
       body: formData
     });
 
     if (res.ok) {
-      router.push('/dashboard');
+      router.push(projectId.value ? { name: 'project-detail', params: { projectId: projectId.value } } : '/dashboard');
     } else if (res.status !== 401) {
       const data = await res.json();
       errorMessage.value = data.message || `Failed to create job: ${res.statusText}`;
@@ -100,14 +103,14 @@ const submitJob = async () => {
 };
 
 const cancel = () => {
-  router.push('/dashboard');
+  router.push(projectId.value ? { name: 'project-detail', params: { projectId: projectId.value } } : '/dashboard');
 };
 </script>
 
 <template>
   <div class="page page-narrow">
     <div class="page-header">
-      <h1>New Translation Job</h1>
+      <h1>{{ projectId ? 'New Job in Project' : 'New Translation Job' }}</h1>
     </div>
 
     <div class="card form-card">
