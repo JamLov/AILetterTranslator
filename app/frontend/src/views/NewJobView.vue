@@ -1,10 +1,9 @@
 <script setup lang="ts">
 import { ref } from 'vue';
 import { useRouter } from 'vue-router';
-import { useAuthStore } from '../stores/auth';
+import { api } from '../api';
 
 const router = useRouter();
-const authStore = useAuthStore();
 const jobName = ref('');
 const notes = ref('');
 const selectedFiles = ref<File[]>([]);
@@ -82,17 +81,14 @@ const submitJob = async () => {
   });
 
   try {
-    const res = await fetch(`${import.meta.env.VITE_API_BASE_URL ?? ''}/api/jobs`, {
+    const res = await api('/api/jobs', {
       method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${authStore.token}`
-      },
       body: formData
     });
 
     if (res.ok) {
       router.push('/dashboard');
-    } else {
+    } else if (res.status !== 401) {
       const data = await res.json();
       errorMessage.value = data.message || `Failed to create job: ${res.statusText}`;
     }

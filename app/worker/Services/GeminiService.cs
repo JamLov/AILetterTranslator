@@ -45,12 +45,16 @@ public class GeminiService : IGeminiService
         delimiter line: ---SECTION_BREAK---
 
         ### Output 1: Transcription
-        Transcribe the text exactly as written in the original language. Preserve paragraph breaks.
-        Use Markdown formatting. If text is unclear, use [illegible] or [unclear: best guess].
+        Transcribe the text exactly as written in the original language. Use Markdown formatting.
+        If text is unclear, use [illegible] or [unclear: best guess].
+        Preserve any natural paragraph breaks from the original. If the original text is written as
+        one continuous block, insert sensible paragraph breaks based on topic shifts, sentence
+        groupings, or changes in subject matter to improve readability.
 
         ### Output 2: Translation
         Translate the full transcription into natural, fluent English. Preserve the tone and style
-        of the original. Use Markdown formatting with paragraph breaks.
+        of the original. Use Markdown formatting. Maintain the same paragraph structure as the
+        transcription above.
 
         ### Output 3: Translation with Contextual Notes
         Provide the same English translation, but add contextual annotations in blockquotes after
@@ -81,7 +85,7 @@ public class GeminiService : IGeminiService
         _logger.LogInformation("Submitting {FileCount} image(s) to Gemini ({Model}), notes: {HasNotes}",
             imageFilePaths.Count, modelName, notes != null ? "yes" : "no");
 
-        var client = new Client(apiKey: apiKey);
+        var client = new Client(apiKey: apiKey, httpOptions: new HttpOptions { Timeout = 300000 });
 
         var parts = new List<Part>();
 
@@ -133,20 +137,48 @@ public class GeminiService : IGeminiService
 
     private GeminiResult ParseResponse(string responseText)
     {
-        var sections = responseText.Split("---SECTION_BREAK---", StringSplitOptions.TrimEntries);
+        var sections = responseText
+            .Split("---SECTION_BREAK---", StringSplitOptions.TrimEntries)
+            .Where(s => !string.IsNullOrWhiteSpace(s))
+            .ToArray();
 
-        _logger.LogInformation("Parsed Gemini response into {Count} section(s)", sections.Length);
+        _logger.LogInformation("Parsed Gemini response into {Count} non-empty section(s)", sections.Length);
+
+        if (sections.Length != 3)
+        {
+            _logger.LogWarning("Expected 3 sections in Gemini response, got {Count}. Logging first 200 chars of each section for diagnostics:", sections.Length);
+            for (var i = 0; i < sections.Length; i++)
+            {
+                _logger.LogWarning("  Section {Index}: {Preview}", i, sections[i][..Math.Min(200, sections[i].Length)]);
+            }
+        }
 
         var transcribed = sections.Length > 0 ? sections[0] : "*No transcription returned.*";
         var translated = sections.Length > 1 ? sections[1] : "*No translation returned.*";
         var translatedWithNotes = sections.Length > 2 ? sections[2] : "*No contextual translation returned.*";
 
-        if (sections.Length < 3)
+        return new GeminiResult(transcribed, translated, translatedWithNotes);
+    }
+
+    public async Task<IReadOnlyList<string>> ListAvailableModelsAsync()
+    {
+        var apiKey = _config["Gemini:ApiKey"];
+        if (string.IsNullOrEmpty(apiKey))
+            return [];
+
+        var client = new Client(apiKey: apiKey);
+        var models = new List<string>();
+
+        var pager = await client.Models.ListAsync();
+        await foreach (var model in pager)
         {
-            _logger.LogWarning("Expected 3 sections in Gemini response, got {Count}. Raw response may need prompt tuning.", sections.Length);
+            if (model.SupportedActions?.Contains("generateContent") == true)
+            {
+                models.Add(model.Name ?? "unknown");
+            }
         }
 
-        return new GeminiResult(transcribed, translated, translatedWithNotes);
+        return models;
     }
 
     private static string GetMimeType(string filePath)

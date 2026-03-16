@@ -96,15 +96,20 @@ public class AzureBlobStorageService : IStorageService
     public async Task<string> ReadTextAsync(string path)
     {
         var blobClient = _containerClient.GetBlobClient(NormalizePath(path));
-        var response = await blobClient.DownloadContentAsync();
-        return response.Value.Content.ToString();
+        using var stream = new MemoryStream();
+        await blobClient.DownloadToAsync(stream);
+        if (stream.Length == 0) return string.Empty;
+        stream.Position = 0;
+        using var reader = new StreamReader(stream);
+        return await reader.ReadToEndAsync();
     }
 
     public async Task<byte[]> ReadBytesAsync(string path)
     {
         var blobClient = _containerClient.GetBlobClient(NormalizePath(path));
-        var response = await blobClient.DownloadContentAsync();
-        return response.Value.Content.ToArray();
+        using var stream = new MemoryStream();
+        await blobClient.DownloadToAsync(stream);
+        return stream.ToArray();
     }
 
     public async Task WriteTextAsync(string path, string content)

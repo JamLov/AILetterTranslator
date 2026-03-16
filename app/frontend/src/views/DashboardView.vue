@@ -2,6 +2,7 @@
 import { ref, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { useAuthStore } from '../stores/auth';
+import { api } from '../api';
 
 interface Job {
   jobId: string;
@@ -24,18 +25,11 @@ onMounted(async () => {
   }
 
   try {
-    const res = await fetch(`${import.meta.env.VITE_API_BASE_URL ?? ''}/api/jobs`, {
-      headers: {
-        'Authorization': `Bearer ${authStore.token}`
-      }
-    });
+    const res = await api('/api/jobs');
 
     if (res.ok) {
       jobs.value = await res.json();
-    } else if (res.status === 401) {
-      authStore.clearAuth();
-      router.push('/login');
-    } else {
+    } else if (res.status !== 401) {
       throw new Error(`Failed to fetch jobs. Server responded with ${res.status}`);
     }
   } catch (err) {

@@ -168,6 +168,7 @@ public class DataService : IDataService
         {
             if (!await _storageService.FileExistsAsync(path)) return null;
             var markdown = await _storageService.ReadTextAsync(path);
+            if (string.IsNullOrWhiteSpace(markdown)) return null;
             return Markdown.ToHtml(markdown, _markdownPipeline);
         }
 

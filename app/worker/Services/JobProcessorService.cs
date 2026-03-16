@@ -73,6 +73,25 @@ public class JobProcessorService : IJobProcessorService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Job {JobId} failed", job.JobId);
+
+            if (ex.Message.Contains("is not found for API version"))
+            {
+                _logger.LogError("The configured Gemini model was not found. Fetching available models...");
+                try
+                {
+                    var availableModels = await _geminiService.ListAvailableModelsAsync();
+                    _logger.LogInformation("Available Gemini models that support generateContent:");
+                    foreach (var model in availableModels)
+                    {
+                        _logger.LogInformation("  - {Model}", model);
+                    }
+                }
+                catch (Exception listEx)
+                {
+                    _logger.LogWarning(listEx, "Failed to list available models");
+                }
+            }
+
             await UpdateJobStatusAsync(job.JobDirectoryPath, "Failed", ex.Message);
         }
     }

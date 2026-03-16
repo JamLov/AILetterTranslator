@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { useAuthStore } from '../stores/auth';
+import { api } from '../api';
 
 interface JobMetadata {
   jobId: string;
@@ -21,24 +21,21 @@ interface JobDetail {
 
 const route = useRoute();
 const router = useRouter();
-const authStore = useAuthStore();
 const job = ref<JobDetail | null>(null);
 const isLoading = ref(true);
 const error = ref<string | null>(null);
-const activeTab = ref<'transcribed' | 'translated' | 'contextual'>('translated');
+const activeTab = ref<'transcribed' | 'translated' | 'contextual'>('transcribed');
 
 onMounted(async () => {
   const jobId = route.params.jobId;
 
   try {
-    const res = await fetch(`${import.meta.env.VITE_API_BASE_URL ?? ''}/api/jobs/${jobId}`, {
-      headers: {
-        'Authorization': `Bearer ${authStore.token}`
-      }
-    });
+    const res = await api(`/api/jobs/${jobId}`);
 
     if (res.ok) {
       job.value = await res.json();
+    } else if (res.status === 401) {
+      return;
     } else if (res.status === 404) {
       error.value = "The job you are looking for could not be found.";
     } else {
@@ -65,11 +62,8 @@ const resetJob = async () => {
   if (!job.value) return;
   isResetting.value = true;
   try {
-    const res = await fetch(`${import.meta.env.VITE_API_BASE_URL ?? ''}/api/jobs/${job.value.metadata.jobId}/reset`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${authStore.token}`
-      }
+    const res = await api(`/api/jobs/${job.value.metadata.jobId}/reset`, {
+      method: 'POST'
     });
     if (res.ok) {
       job.value.metadata.status = 'Not Started';
