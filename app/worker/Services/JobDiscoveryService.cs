@@ -34,6 +34,8 @@ public class JobDiscoveryService : IJobDiscoveryService
         var pendingJobs = new List<PendingJob>();
         var userDirectories = await _storageService.GetDirectoriesAsync(dataStoragePath);
 
+        _logger.LogInformation("Found {Count} user directory(ies) to scan", userDirectories.Count());
+
         foreach (var userDir in userDirectories)
         {
             var userId = Path.GetFileName(userDir);
@@ -43,6 +45,7 @@ public class JobDiscoveryService : IJobDiscoveryService
                 continue;
 
             var jobDirectories = await _storageService.GetDirectoriesAsync(userDataPath);
+            _logger.LogInformation("User {UserId}: scanning {Count} job directory(ies)", userId, jobDirectories.Count());
 
             foreach (var jobDir in jobDirectories)
             {
@@ -59,7 +62,7 @@ public class JobDiscoveryService : IJobDiscoveryService
                     if (metadata != null && metadata.Status == "Not Started")
                     {
                         pendingJobs.Add(new PendingJob(userId, jobDir, metadata.JobId, metadata.JobName));
-                        _logger.LogDebug("Found pending job {JobId} for user {UserId}", metadata.JobId, userId);
+                        _logger.LogInformation("Found pending job {JobId} ({JobName}) for user {UserId}", metadata.JobId, metadata.JobName, userId);
                     }
                 }
                 catch (Exception ex)

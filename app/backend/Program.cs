@@ -57,6 +57,17 @@ builder.Services.AddAuthorization();
 
 var app = builder.Build();
 
+// Log configuration summary at startup
+Log.Information("=== Backend Configuration ===");
+Log.Information("  Environment:      {Environment}", app.Environment.EnvironmentName);
+Log.Information("  StorageProvider:   {StorageProvider}", builder.Configuration["StorageProvider"] ?? "Local (default)");
+Log.Information("  DataStoragePath:   {DataStoragePath}", builder.Configuration["DataStoragePath"] ?? "(not set)");
+Log.Information("  Google ClientId:   {ClientId}", string.IsNullOrEmpty(builder.Configuration["Authentication:Google:ClientId"]) ? "(not set)" : "****");
+Log.Information("  AllowedUsers:      {Count} configured", builder.Configuration.GetSection("AllowedUsers").GetChildren().Count(c => !string.IsNullOrEmpty(c.Value)));
+Log.Information("  AzureBlob Conn:    {ConnStr}", string.IsNullOrEmpty(builder.Configuration["AzureBlob:ConnectionString"]) ? "(not set)" : "****");
+Log.Information("  AzureBlob Container: {Container}", builder.Configuration["AzureBlob:ContainerName"] ?? "(not set)");
+Log.Information("=============================");
+
 if (app.Environment.IsDevelopment())
 {
     app.UseCors(policy => 

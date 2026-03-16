@@ -25,6 +25,7 @@ public class JobProcessorService : IJobProcessorService
 
         try
         {
+            _logger.LogInformation("Job {JobId}: setting status to In Progress", job.JobId);
             await UpdateJobStatusAsync(job.JobDirectoryPath, "In Progress");
 
             var filesPath = Path.Combine(job.JobDirectoryPath, "files");
@@ -48,8 +49,10 @@ public class JobProcessorService : IJobProcessorService
             _logger.LogInformation("Job {JobId}: {FileCount} image(s), notes: {HasNotes}",
                 job.JobId, imageFilePaths.Count, notes != null ? "yes" : "no");
 
+            _logger.LogInformation("Job {JobId}: sending to Gemini for processing", job.JobId);
             var result = await _geminiService.ProcessAsync(imageFilePaths, notes);
 
+            _logger.LogInformation("Job {JobId}: writing output files", job.JobId);
             await _storageService.WriteTextAsync(
                 Path.Combine(job.JobDirectoryPath, "Transcribed.md"),
                 result.TranscribedMarkdown);
@@ -62,6 +65,7 @@ public class JobProcessorService : IJobProcessorService
                 Path.Combine(job.JobDirectoryPath, "Transcribed_Translated_With_Notes.md"),
                 result.TranslatedWithNotesMarkdown);
 
+            _logger.LogInformation("Job {JobId}: setting status to Finished", job.JobId);
             await UpdateJobStatusAsync(job.JobDirectoryPath, "Finished");
 
             _logger.LogInformation("Job {JobId} completed successfully", job.JobId);
@@ -88,6 +92,6 @@ public class JobProcessorService : IJobProcessorService
         var updatedJson = JsonSerializer.Serialize(metadata, new JsonSerializerOptions { WriteIndented = true });
         await _storageService.WriteTextAsync(metadataPath, updatedJson);
 
-        _logger.LogDebug("Updated job status to {Status} at {Path}", status, metadataPath);
+        _logger.LogInformation("Updated job status to {Status}", status);
     }
 }

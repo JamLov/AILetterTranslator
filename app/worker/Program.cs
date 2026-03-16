@@ -16,7 +16,9 @@ try
     var builder = Host.CreateApplicationBuilder(args);
 
     builder.Services.AddSerilog((services, loggerConfig) =>
-        loggerConfig.ReadFrom.Configuration(builder.Configuration));
+        loggerConfig
+            .ReadFrom.Configuration(builder.Configuration)
+            .WriteTo.Console());
 
     var storageProvider = builder.Configuration["StorageProvider"];
     if (string.Equals(storageProvider, "AzureBlob", StringComparison.OrdinalIgnoreCase))
@@ -31,6 +33,17 @@ try
 
     using var scope = host.Services.CreateScope();
     var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
+
+    // Log configuration summary at startup
+    logger.LogInformation("=== Worker Configuration ===");
+    logger.LogInformation("  StorageProvider:   {StorageProvider}", builder.Configuration["StorageProvider"] ?? "Local (default)");
+    logger.LogInformation("  DataStoragePath:   {DataStoragePath}", builder.Configuration["DataStoragePath"] ?? "(not set)");
+    logger.LogInformation("  Gemini ApiKey:     {ApiKey}", string.IsNullOrEmpty(builder.Configuration["Gemini:ApiKey"]) ? "(not set)" : "****");
+    logger.LogInformation("  Gemini Model:      {Model}", builder.Configuration["Gemini:Model"] ?? "gemini-2.5-pro (default)");
+    logger.LogInformation("  AzureBlob Conn:    {ConnStr}", string.IsNullOrEmpty(builder.Configuration["AzureBlob:ConnectionString"]) ? "(not set)" : "****");
+    logger.LogInformation("  AzureBlob Container: {Container}", builder.Configuration["AzureBlob:ContainerName"] ?? "(not set)");
+    logger.LogInformation("============================");
+
     var discoveryService = scope.ServiceProvider.GetRequiredService<IJobDiscoveryService>();
     var processorService = scope.ServiceProvider.GetRequiredService<IJobProcessorService>();
 
@@ -55,6 +68,7 @@ try
 catch (Exception ex)
 {
     Log.Fatal(ex, "Worker terminated unexpectedly");
+    Console.Error.WriteLine($"FATAL: Worker terminated unexpectedly: {ex}");
     Environment.ExitCode = 1;
 }
 finally

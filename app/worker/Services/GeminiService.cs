@@ -81,15 +81,17 @@ public class GeminiService : IGeminiService
         parts.Add(Part.FromText(prompt));
 
         _logger.LogInformation("Sending request to Gemini API...");
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
 
         var response = await client.Models.GenerateContentAsync(
             model: modelName,
             contents: [new Content { Role = "user", Parts = parts }]
         );
 
+        stopwatch.Stop();
         var responseText = response.Candidates?[0].Content?.Parts?[0].Text ?? "";
 
-        _logger.LogInformation("Received response from Gemini ({Length} chars)", responseText.Length);
+        _logger.LogInformation("Received response from Gemini in {Elapsed}ms ({Length} chars)", stopwatch.ElapsedMilliseconds, responseText.Length);
 
         return ParseResponse(responseText);
     }
@@ -97,6 +99,8 @@ public class GeminiService : IGeminiService
     private GeminiResult ParseResponse(string responseText)
     {
         var sections = responseText.Split("---SECTION_BREAK---", StringSplitOptions.TrimEntries);
+
+        _logger.LogInformation("Parsed Gemini response into {Count} section(s)", sections.Length);
 
         var transcribed = sections.Length > 0 ? sections[0] : "*No transcription returned.*";
         var translated = sections.Length > 1 ? sections[1] : "*No translation returned.*";

@@ -34,8 +34,7 @@ public class JobsController : ControllerBase
     {
         var subClaim = User.FindFirst(ClaimTypes.NameIdentifier) ?? User.FindFirst("sub");
         var userId = subClaim?.Value;
-        _logger.LogDebug("GetJobsAsync called for user ID: {UserId}", userId);
-
+        _logger.LogInformation("Listing jobs for user {UserId}", userId);
 
         if (string.IsNullOrEmpty(userId))
         {
@@ -43,6 +42,7 @@ public class JobsController : ControllerBase
         }
 
         var jobs = await _dataService.GetJobsAsync(userId);
+        _logger.LogInformation("Returning {Count} job(s) for user {UserId}", jobs.Count(), userId);
         return Ok(jobs);
     }
 
@@ -51,8 +51,7 @@ public class JobsController : ControllerBase
     {
         var subClaim = User.FindFirst(ClaimTypes.NameIdentifier) ?? User.FindFirst("sub");
         var userId = subClaim?.Value;
-        _logger.LogDebug("GetJobDetailAsync called for user ID: {UserId} and Job ID: {JobId}", userId, jobId);
-
+        _logger.LogInformation("Getting job detail for job {JobId}, user {UserId}", jobId, userId);
 
         if (string.IsNullOrEmpty(userId))
         {
@@ -63,9 +62,11 @@ public class JobsController : ControllerBase
 
         if (jobDetail == null)
         {
+            _logger.LogInformation("Job {JobId} not found for user {UserId}", jobId, userId);
             return NotFound();
         }
 
+        _logger.LogInformation("Returning job detail for {JobId} (status: {Status})", jobId, jobDetail.Metadata.Status);
         return Ok(jobDetail);
     }
     
@@ -74,6 +75,7 @@ public class JobsController : ControllerBase
     {
         var subClaim = User.FindFirst(ClaimTypes.NameIdentifier) ?? User.FindFirst("sub");
         var userId = subClaim?.Value;
+        _logger.LogInformation("Reset requested for job {JobId}, user {UserId}", jobId, userId);
 
         if (string.IsNullOrEmpty(userId))
         {
@@ -84,20 +86,22 @@ public class JobsController : ControllerBase
 
         if (!result)
         {
+            _logger.LogInformation("Reset failed - job {JobId} not found for user {UserId}", jobId, userId);
             return NotFound();
         }
 
+        _logger.LogInformation("Job {JobId} reset successfully", jobId);
         return NoContent();
     }
 
     [HttpPost]
     public async Task<IActionResult> CreateJobAsync([FromForm] CreateJobRequest request)
     {
-        _logger.LogInformation("Processing create job request.");
+        _logger.LogInformation("Create job request from {Email}", User.FindFirst(ClaimTypes.Email)?.Value ?? "unknown");
 
         var emailClaim = User.FindFirst(ClaimTypes.Email);
         var email = emailClaim?.Value;
-        
+
         if (!_userService.IsUserAllowed(email))
         {
             return StatusCode(StatusCodes.Status403Forbidden, new { error = "Unauthorized", message = $"Access denied for {email ?? "unknown user"}." });
@@ -105,7 +109,6 @@ public class JobsController : ControllerBase
 
         var subClaim = User.FindFirst(ClaimTypes.NameIdentifier) ?? User.FindFirst("sub");
         var userId = subClaim?.Value;
-        _logger.LogDebug("CreateJobAsync called for user ID: {UserId}", userId);
         
         if (string.IsNullOrEmpty(userId))
         {
@@ -137,17 +140,22 @@ public class JobsController : ControllerBase
         {
             if (file.Length > MaxFileSizeBytes)
             {
+                _logger.LogInformation("File rejected: {FileName} exceeds 4MB ({Size} bytes)", file.FileName, file.Length);
                 return BadRequest(new { error = "InvalidFile", message = $"File '{file.FileName}' exceeds the maximum allowed size of 4MB." });
             }
             if (!AllowedContentTypes.Contains(file.ContentType.ToLowerInvariant()))
             {
+                _logger.LogInformation("File rejected: {FileName} has unsupported type {ContentType}", file.FileName, file.ContentType);
                 return BadRequest(new { error = "InvalidFile", message = $"File '{file.FileName}' has an unsupported type. Only JPG and PNG are allowed." });
             }
         }
 
+        _logger.LogInformation("Creating job '{JobName}' with {FileCount} file(s) for user {UserId}", request.JobName, request.Files.Count, userId);
+
         try
         {
             var jobMetadata = await _dataService.CreateJobAsync(userId, request);
+            _logger.LogInformation("Job {JobId} created successfully", jobMetadata.JobId);
             return Created($"/api/jobs/{jobMetadata.JobId}", jobMetadata);
         }
         catch (Exception ex)

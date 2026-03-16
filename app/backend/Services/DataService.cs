@@ -51,6 +51,7 @@ public class DataService : IDataService
         {
             var notesPath = Path.Combine(jobDirectoryPath, "notes.txt");
             await _storageService.WriteTextAsync(notesPath, request.Notes);
+            _logger.LogInformation("Job {JobId}: wrote notes ({Length} chars)", jobId, request.Notes.Length);
         }
 
         // 3. Write Images
@@ -60,6 +61,7 @@ public class DataService : IDataService
             var filePath = Path.Combine(filesDirectoryPath, safeFileName);
             using var stream = file.OpenReadStream();
             await _storageService.WriteFileAsync(filePath, stream);
+            _logger.LogInformation("Job {JobId}: wrote file {FileName} ({Size} bytes)", jobId, safeFileName, file.Length);
         }
 
         // 4. Write Metadata
@@ -84,8 +86,7 @@ public class DataService : IDataService
     {
         var dataStoragePath = _config["DataStoragePath"] ?? "data";
         var userJobsPath = Path.Combine(dataStoragePath, userId, "data");
-        _logger.LogDebug("Scanning for jobs in path: {Path}", userJobsPath);
-
+        _logger.LogInformation("Scanning for jobs for user {UserId}", userId);
 
         if (!await _storageService.DirectoryExistsAsync(userJobsPath))
         {
@@ -118,6 +119,7 @@ public class DataService : IDataService
             }
         }
         
+        _logger.LogInformation("Found {Count} job(s) for user {UserId}", jobs.Count, userId);
         // Return newest first
         return jobs.OrderByDescending(j => j.CreatedAt);
     }
@@ -126,8 +128,7 @@ public class DataService : IDataService
     {
         var dataStoragePath = _config["DataStoragePath"] ?? "data";
         var jobDirectoryPath = Path.Combine(dataStoragePath, userId, "data", jobId.ToString());
-        _logger.LogDebug("Getting job detail for path: {Path}", jobDirectoryPath);
-
+        _logger.LogInformation("Loading job detail for {JobId}", jobId);
 
         if (!await _storageService.DirectoryExistsAsync(jobDirectoryPath))
         {
@@ -180,6 +181,8 @@ public class DataService : IDataService
             TranslatedWithNotesHtml = await ReadAndConvertMdAsync(translatedWithNotesMdPath)
         };
 
+        _logger.LogInformation("Job {JobId} detail loaded (status: {Status}, files: {FileCount}, has results: {HasResults})",
+            jobId, metadata.Status, originalFileNames.Count, jobDetail.TranscribedHtml != null);
         return jobDetail;
     }
 
@@ -212,6 +215,7 @@ public class DataService : IDataService
         }
 
         // Delete output files
+        _logger.LogInformation("Resetting job {JobId}: deleting output files", jobId);
         foreach (var outputFile in OutputFiles)
         {
             var filePath = Path.Combine(jobDirectoryPath, outputFile);

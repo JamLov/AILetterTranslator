@@ -1,3 +1,5 @@
+name: letter-translation
+
 services:
   frontend:
     build:
@@ -6,6 +8,9 @@ services:
         VITE_GOOGLE_CLIENT_ID: ${VITE_GOOGLE_CLIENT_ID}
     ports:
       - "${APP_PORT:-3000}:80"
+    environment:
+      - BACKEND_HOST=backend
+      - BACKEND_PORT=8080
     depends_on:
       - backend
 
@@ -20,7 +25,6 @@ services:
     environment:
       - ASPNETCORE_ENVIRONMENT=Production
       - DataStoragePath=/data
-      - StorageProvider=Local
     volumes:
       - ./data:/data
 

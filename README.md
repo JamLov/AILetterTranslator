@@ -202,3 +202,4 @@ Key decisions are documented in `/adr`:
 | 010 | Google Gemini AI integration and prompt design |
 | 011 | Docker deployment with Nginx reverse proxy |
 | 012 | Azure Blob Storage provider implementation |
+| 013 | Azure Container Apps deployment |
