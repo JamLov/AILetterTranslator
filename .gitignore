@@ -1,0 +1,40 @@
+# .NET build artifacts
+bin/
+obj/
+
+# User-specific files
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Visual Studio Code
+.vscode/
+
+# Test results
+/test-results/
+/TestResults/
+
+# User data (should not be committed)
+/data/
+/app/backend/data/
+
+# Logs
+*.log
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Rider
+.idea/
+*.sln.iml
+
+# npm & frontend
+node_modules/
+
+# Others
+*.swp
+app/backend/logs/**
+docker/.env
+docker/data/

@@ -1,0 +1,93 @@
+using System.Text.Json;
+using LetterTranslation.Shared.Models;
+using LetterTranslation.Shared.Services;
+using LetterTranslation.Worker.Models;
+using Microsoft.Extensions.Logging;
+
+namespace LetterTranslation.Worker.Services;
+
+public class JobProcessorService : IJobProcessorService
+{
+    private readonly IStorageService _storageService;
+    private readonly IGeminiService _geminiService;
+    private readonly ILogger<JobProcessorService> _logger;
+
+    public JobProcessorService(IStorageService storageService, IGeminiService geminiService, ILogger<JobProcessorService> logger)
+    {
+        _storageService = storageService;
+        _geminiService = geminiService;
+        _logger = logger;
+    }
+
+    public async Task ProcessJobAsync(PendingJob job)
+    {
+        _logger.LogInformation("Processing job {JobId} ({JobName}) for user {UserId}", job.JobId, job.JobName, job.UserId);
+
+        try
+        {
+            await UpdateJobStatusAsync(job.JobDirectoryPath, "In Progress");
+
+            var filesPath = Path.Combine(job.JobDirectoryPath, "files");
+            var imageFilePaths = new List<string>();
+
+            if (await _storageService.DirectoryExistsAsync(filesPath))
+            {
+                var fileNames = await _storageService.GetFileNamesAsync(filesPath);
+                imageFilePaths.AddRange(
+                    fileNames.Where(f => f != null)
+                             .Select(f => Path.Combine(filesPath, f!)));
+            }
+
+            var notesPath = Path.Combine(job.JobDirectoryPath, "notes.txt");
+            string? notes = null;
+            if (await _storageService.FileExistsAsync(notesPath))
+            {
+                notes = await _storageService.ReadTextAsync(notesPath);
+            }
+
+            _logger.LogInformation("Job {JobId}: {FileCount} image(s), notes: {HasNotes}",
+                job.JobId, imageFilePaths.Count, notes != null ? "yes" : "no");
+
+            var result = await _geminiService.ProcessAsync(imageFilePaths, notes);
+
+            await _storageService.WriteTextAsync(
+                Path.Combine(job.JobDirectoryPath, "Transcribed.md"),
+                result.TranscribedMarkdown);
+
+            await _storageService.WriteTextAsync(
+                Path.Combine(job.JobDirectoryPath, "Transcribed_Translated.md"),
+                result.TranslatedMarkdown);
+
+            await _storageService.WriteTextAsync(
+                Path.Combine(job.JobDirectoryPath, "Transcribed_Translated_With_Notes.md"),
+                result.TranslatedWithNotesMarkdown);
+
+            await UpdateJobStatusAsync(job.JobDirectoryPath, "Finished");
+
+            _logger.LogInformation("Job {JobId} completed successfully", job.JobId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Job {JobId} failed", job.JobId);
+            await UpdateJobStatusAsync(job.JobDirectoryPath, "Failed", ex.Message);
+        }
+    }
+
+    private async Task UpdateJobStatusAsync(string jobDirectoryPath, string status, string? errorMessage = null)
+    {
+        var metadataPath = Path.Combine(jobDirectoryPath, "metadata.json");
+        var json = await _storageService.ReadTextAsync(metadataPath);
+        var metadata = JsonSerializer.Deserialize<JobMetadata>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+
+        if (metadata == null)
+            throw new InvalidOperationException($"Failed to deserialize metadata at {metadataPath}");
+
+        metadata.Status = status;
+        metadata.ErrorMessage = errorMessage;
+
+        var updatedJson = JsonSerializer.Serialize(metadata, new JsonSerializerOptions { WriteIndented = true });
+        await _storageService.WriteTextAsync(metadataPath, updatedJson);
+
+        _logger.LogDebug("Updated job status to {Status} at {Path}", status, metadataPath);
+    }
+}

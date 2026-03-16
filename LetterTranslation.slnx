@@ -1,0 +1,23 @@
+<Solution>
+  <Folder Name="/app/">
+    <Folder Name="/app/backend/">
+      <Project Path="app/backend/LetterTranslation.Api.csproj" />
+    </Folder>
+    <Folder Name="/app/shared/">
+      <Project Path="app/shared/LetterTranslation.Shared.csproj" />
+    </Folder>
+    <Folder Name="/app/worker/">
+      <Project Path="app/worker/LetterTranslation.Worker.csproj" />
+    </Folder>
+  </Folder>
+  <Folder Name="/tests/">
+    <Folder Name="/tests/tests-backend/">
+      <Project Path="tests/backend/UnitTests/LetterTranslation.Api.UnitTests.csproj" />
+      <Project Path="tests/backend/IntegrationTests/LetterTranslation.Api.IntegrationTests.csproj" />
+    </Folder>
+    <Folder Name="/tests/tests-worker/">
+      <Project Path="tests/worker/UnitTests/LetterTranslation.Worker.UnitTests.csproj" />
+      <Project Path="tests/worker/IntegrationTests/LetterTranslation.Worker.IntegrationTests.csproj" />
+    </Folder>
+  </Folder>
+</Solution>

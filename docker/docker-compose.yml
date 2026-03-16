@@ -1,0 +1,37 @@
+services:
+  frontend:
+    build:
+      context: ../app/frontend
+      args:
+        VITE_GOOGLE_CLIENT_ID: ${VITE_GOOGLE_CLIENT_ID}
+    ports:
+      - "${APP_PORT:-3000}:80"
+    depends_on:
+      - backend
+
+  backend:
+    build:
+      context: ../app
+      dockerfile: backend/Dockerfile
+    expose:
+      - "8080"
+    env_file:
+      - .env
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - DataStoragePath=/data
+      - StorageProvider=Local
+    volumes:
+      - ./data:/data
+
+  worker:
+    build:
+      context: ../app
+      dockerfile: worker/Dockerfile
+    env_file:
+      - .env
+    environment:
+      - DOTNET_ENVIRONMENT=Production
+      - DataStoragePath=/data
+    volumes:
+      - ./data:/data
