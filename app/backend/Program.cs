@@ -17,6 +17,7 @@ builder.Host.UseSerilog();
 builder.Services.AddControllers();
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddScoped<IUserService, UserService>();
+builder.Services.AddScoped<VersionOperations>();
 builder.Services.AddScoped<IDataService, DataService>();
 builder.Services.AddScoped<IProjectService, ProjectService>();
 

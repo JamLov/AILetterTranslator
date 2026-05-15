@@ -157,4 +157,161 @@ public class JobProcessorServiceTests
             It.Is<IReadOnlyList<string>>(l => l.Count == 0),
             null), Times.Once);
     }
+
+    [Fact]
+    public async Task ProcessJobAsync_SkipsFilesDirectory_WhenNotExists()
+    {
+        SetupMetadata();
+        _storageMock.Setup(s => s.DirectoryExistsAsync(Path.Combine(_jobDir, "files"))).ReturnsAsync(false);
+        _storageMock.Setup(s => s.FileExistsAsync(Path.Combine(_jobDir, "notes.txt"))).ReturnsAsync(false);
+
+        _geminiMock.Setup(g => g.ProcessAsync(It.IsAny<IReadOnlyList<string>>(), It.IsAny<string?>()))
+            .ReturnsAsync(new GeminiResult("t", "tr", "trn"));
+
+        await _sut.ProcessJobAsync(CreatePendingJob());
+
+        _storageMock.Verify(s => s.GetFileNamesAsync(It.IsAny<string>()), Times.Never);
+        _geminiMock.Verify(g => g.ProcessAsync(
+            It.Is<IReadOnlyList<string>>(l => l.Count == 0),
+            null), Times.Once);
+    }
+
+    [Fact]
+    public async Task ProcessJobAsync_SavesLetterDate_WhenReturnedByGemini()
+    {
+        SetupMetadata();
+        _storageMock.Setup(s => s.DirectoryExistsAsync(Path.Combine(_jobDir, "files"))).ReturnsAsync(true);
+        _storageMock.Setup(s => s.GetFileNamesAsync(Path.Combine(_jobDir, "files"))).ReturnsAsync(new[] { "img.png" });
+        _storageMock.Setup(s => s.FileExistsAsync(Path.Combine(_jobDir, "notes.txt"))).ReturnsAsync(false);
+
+        _geminiMock.Setup(g => g.ProcessAsync(It.IsAny<IReadOnlyList<string>>(), It.IsAny<string?>()))
+            .ReturnsAsync(new GeminiResult("t", "tr", "trn", "1943-05-12"));
+
+        await _sut.ProcessJobAsync(CreatePendingJob());
+
+        // The metadata should be written with LetterDate set
+        _storageMock.Verify(s => s.WriteTextAsync(
+            _metadataPath,
+            It.Is<string>(j => j.Contains("1943-05-12"))), Times.Once);
+    }
+
+    [Fact]
+    public async Task ProcessJobAsync_DoesNotSaveLetterDate_WhenNull()
+    {
+        SetupMetadata();
+        _storageMock.Setup(s => s.DirectoryExistsAsync(Path.Combine(_jobDir, "files"))).ReturnsAsync(true);
+        _storageMock.Setup(s => s.GetFileNamesAsync(Path.Combine(_jobDir, "files"))).ReturnsAsync(new[] { "img.png" });
+        _storageMock.Setup(s => s.FileExistsAsync(Path.Combine(_jobDir, "notes.txt"))).ReturnsAsync(false);
+
+        _geminiMock.Setup(g => g.ProcessAsync(It.IsAny<IReadOnlyList<string>>(), It.IsAny<string?>()))
+            .ReturnsAsync(new GeminiResult("t", "tr", "trn"));
+
+        await _sut.ProcessJobAsync(CreatePendingJob());
+
+        // Metadata written exactly twice: In Progress + Finished, neither should contain LetterDate value
+        _storageMock.Verify(s => s.WriteTextAsync(_metadataPath, It.IsAny<string>()), Times.Exactly(2));
+    }
+
+    [Fact]
+    public async Task ProcessJobAsync_LogsProjectId_WhenProjectJob()
+    {
+        SetupMetadata();
+        _storageMock.Setup(s => s.DirectoryExistsAsync(Path.Combine(_jobDir, "files"))).ReturnsAsync(true);
+        _storageMock.Setup(s => s.GetFileNamesAsync(Path.Combine(_jobDir, "files"))).ReturnsAsync(new[] { "img.png" });
+        _storageMock.Setup(s => s.FileExistsAsync(Path.Combine(_jobDir, "notes.txt"))).ReturnsAsync(false);
+
+        _geminiMock.Setup(g => g.ProcessAsync(It.IsAny<IReadOnlyList<string>>(), It.IsAny<string?>()))
+            .ReturnsAsync(new GeminiResult("t", "tr", "trn"));
+
+        var projectJob = new PendingJob(_jobDir, _jobId, "Test Job", "proj-123", "user1");
+
+        await _sut.ProcessJobAsync(projectJob);
+
+        _storageMock.Verify(s => s.WriteTextAsync(
+            _metadataPath,
+            It.Is<string>(j => j.Contains("Finished"))), Times.Once);
+    }
+
+    [Fact]
+    public async Task ProcessJobAsync_ModelNotFound_ListsAvailableModels()
+    {
+        SetupMetadata();
+        _storageMock.Setup(s => s.DirectoryExistsAsync(Path.Combine(_jobDir, "files"))).ReturnsAsync(true);
+        _storageMock.Setup(s => s.GetFileNamesAsync(Path.Combine(_jobDir, "files"))).ReturnsAsync(new[] { "img.png" });
+        _storageMock.Setup(s => s.FileExistsAsync(Path.Combine(_jobDir, "notes.txt"))).ReturnsAsync(false);
+
+        _geminiMock.Setup(g => g.ProcessAsync(It.IsAny<IReadOnlyList<string>>(), It.IsAny<string?>()))
+            .ThrowsAsync(new Exception("models/gemini-2.0-flash is not found for API version v1beta"));
+
+        _geminiMock.Setup(g => g.ListAvailableModelsAsync())
+            .ReturnsAsync(new[] { "models/gemini-1.5-flash", "models/gemini-1.5-pro" });
+
+        await _sut.ProcessJobAsync(CreatePendingJob());
+
+        _geminiMock.Verify(g => g.ListAvailableModelsAsync(), Times.Once);
+        _storageMock.Verify(s => s.WriteTextAsync(
+            _metadataPath,
+            It.Is<string>(j => j.Contains("Failed"))), Times.Once);
+    }
+
+    [Fact]
+    public async Task ProcessJobAsync_ModelNotFound_HandlesListModelsFailure()
+    {
+        SetupMetadata();
+        _storageMock.Setup(s => s.DirectoryExistsAsync(Path.Combine(_jobDir, "files"))).ReturnsAsync(true);
+        _storageMock.Setup(s => s.GetFileNamesAsync(Path.Combine(_jobDir, "files"))).ReturnsAsync(new[] { "img.png" });
+        _storageMock.Setup(s => s.FileExistsAsync(Path.Combine(_jobDir, "notes.txt"))).ReturnsAsync(false);
+
+        _geminiMock.Setup(g => g.ProcessAsync(It.IsAny<IReadOnlyList<string>>(), It.IsAny<string?>()))
+            .ThrowsAsync(new Exception("models/gemini-2.0-flash is not found for API version v1beta"));
+
+        _geminiMock.Setup(g => g.ListAvailableModelsAsync())
+            .ThrowsAsync(new Exception("Network error"));
+
+        await _sut.ProcessJobAsync(CreatePendingJob());
+
+        _geminiMock.Verify(g => g.ListAvailableModelsAsync(), Times.Once);
+        _storageMock.Verify(s => s.WriteTextAsync(
+            _metadataPath,
+            It.Is<string>(j => j.Contains("Failed"))), Times.Once);
+    }
+
+    [Fact]
+    public async Task ProcessJobAsync_GenericError_DoesNotListModels()
+    {
+        SetupMetadata();
+        _storageMock.Setup(s => s.DirectoryExistsAsync(Path.Combine(_jobDir, "files"))).ReturnsAsync(true);
+        _storageMock.Setup(s => s.GetFileNamesAsync(Path.Combine(_jobDir, "files"))).ReturnsAsync(new[] { "img.png" });
+        _storageMock.Setup(s => s.FileExistsAsync(Path.Combine(_jobDir, "notes.txt"))).ReturnsAsync(false);
+
+        _geminiMock.Setup(g => g.ProcessAsync(It.IsAny<IReadOnlyList<string>>(), It.IsAny<string?>()))
+            .ThrowsAsync(new Exception("Some other error"));
+
+        await _sut.ProcessJobAsync(CreatePendingJob());
+
+        _geminiMock.Verify(g => g.ListAvailableModelsAsync(), Times.Never);
+    }
+
+    [Fact]
+    public async Task ProcessJobAsync_MultipleImageFiles_PassesAllToGemini()
+    {
+        SetupMetadata();
+        var filesPath = Path.Combine(_jobDir, "files");
+        _storageMock.Setup(s => s.DirectoryExistsAsync(filesPath)).ReturnsAsync(true);
+        _storageMock.Setup(s => s.GetFileNamesAsync(filesPath))
+            .ReturnsAsync(new[] { "page1.jpg", "page2.jpg", "page3.png" });
+        _storageMock.Setup(s => s.FileExistsAsync(Path.Combine(_jobDir, "notes.txt"))).ReturnsAsync(false);
+
+        _geminiMock.Setup(g => g.ProcessAsync(It.IsAny<IReadOnlyList<string>>(), It.IsAny<string?>()))
+            .ReturnsAsync(new GeminiResult("t", "tr", "trn"));
+
+        await _sut.ProcessJobAsync(CreatePendingJob());
+
+        _geminiMock.Verify(g => g.ProcessAsync(
+            It.Is<IReadOnlyList<string>>(l => l.Count == 3
+                && l[0] == Path.Combine(filesPath, "page1.jpg")
+                && l[1] == Path.Combine(filesPath, "page2.jpg")
+                && l[2] == Path.Combine(filesPath, "page3.png")),
+            null), Times.Once);
+    }
 }
