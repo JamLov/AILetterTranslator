@@ -540,5 +540,166 @@ public class JobsControllerTests
     }
 
     #endregion
+
+    #region Versioning
+
+    [Fact]
+    public async Task GetJobVersionsAsync_WhenNotFound_Returns404()
+    {
+        SetUserContext("user@example.com", "user-1");
+        _dataServiceMock.Setup(s => s.GetJobVersionsAsync("user-1", It.IsAny<Guid>()))
+            .ReturnsAsync((IEnumerable<VersionSummary>?)null);
+
+        var result = await _controller.GetJobVersionsAsync(Guid.NewGuid());
+
+        Assert.IsType<NotFoundResult>(result);
+    }
+
+    [Fact]
+    public async Task GetJobVersionsAsync_HappyPath_ReturnsOk()
+    {
+        SetUserContext("user@example.com", "user-1");
+        var jobId = Guid.NewGuid();
+        var versions = new List<VersionSummary>
+        {
+            new() { VersionNumber = 2, IsCurrent = true, ProcessingMode = "TranscriptionEdit" },
+            new() { VersionNumber = 1, IsCurrent = false, ProcessingMode = "Initial" }
+        };
+        _dataServiceMock.Setup(s => s.GetJobVersionsAsync("user-1", jobId)).ReturnsAsync(versions);
+
+        var result = await _controller.GetJobVersionsAsync(jobId);
+
+        var ok = Assert.IsType<OkObjectResult>(result);
+        ok.Value.Should().BeEquivalentTo(versions);
+    }
+
+    [Fact]
+    public async Task CreateJobVersionAsync_WithEmptyEditedMarkdown_Returns400()
+    {
+        SetUserContext("user@example.com", "user-1");
+
+        var result = await _controller.CreateJobVersionAsync(Guid.NewGuid(),
+            new CreateVersionRequest { Mode = "TranscriptionEdit", EditedMarkdown = "  " });
+
+        Assert.IsType<BadRequestObjectResult>(result);
+    }
+
+    [Fact]
+    public async Task CreateJobVersionAsync_WithOversizedMarkdown_Returns400()
+    {
+        SetUserContext("user@example.com", "user-1");
+
+        var result = await _controller.CreateJobVersionAsync(Guid.NewGuid(),
+            new CreateVersionRequest { Mode = "TranscriptionEdit", EditedMarkdown = new string('x', 200 * 1024 + 1) });
+
+        Assert.IsType<BadRequestObjectResult>(result);
+    }
+
+    [Fact]
+    public async Task CreateJobVersionAsync_WhenInvalidMode_Returns400()
+    {
+        SetUserContext("user@example.com", "user-1");
+        _dataServiceMock.Setup(s => s.CreateJobVersionAsync("user-1", It.IsAny<Guid>(), It.IsAny<CreateVersionRequest>()))
+            .ReturnsAsync((null, "InvalidMode"));
+
+        var result = await _controller.CreateJobVersionAsync(Guid.NewGuid(),
+            new CreateVersionRequest { Mode = "Bad", EditedMarkdown = "x" });
+
+        Assert.IsType<BadRequestObjectResult>(result);
+    }
+
+    [Fact]
+    public async Task CreateJobVersionAsync_WhenNotFound_Returns404()
+    {
+        SetUserContext("user@example.com", "user-1");
+        _dataServiceMock.Setup(s => s.CreateJobVersionAsync("user-1", It.IsAny<Guid>(), It.IsAny<CreateVersionRequest>()))
+            .ReturnsAsync((null, "NotFound"));
+
+        var result = await _controller.CreateJobVersionAsync(Guid.NewGuid(),
+            new CreateVersionRequest { Mode = "TranscriptionEdit", EditedMarkdown = "x" });
+
+        Assert.IsType<NotFoundResult>(result);
+    }
+
+    [Fact]
+    public async Task CreateJobVersionAsync_WhenConflict_Returns409()
+    {
+        SetUserContext("user@example.com", "user-1");
+        _dataServiceMock.Setup(s => s.CreateJobVersionAsync("user-1", It.IsAny<Guid>(), It.IsAny<CreateVersionRequest>()))
+            .ReturnsAsync((null, "Conflict"));
+
+        var result = await _controller.CreateJobVersionAsync(Guid.NewGuid(),
+            new CreateVersionRequest { Mode = "TranscriptionEdit", EditedMarkdown = "x" });
+
+        Assert.IsType<ConflictObjectResult>(result);
+    }
+
+    [Fact]
+    public async Task CreateJobVersionAsync_HappyPath_Returns202WithLatestVersion()
+    {
+        SetUserContext("user@example.com", "user-1");
+        var metadata = new JobMetadata
+        {
+            JobId = Guid.NewGuid(), JobName = "x", CreatedAt = DateTime.UtcNow,
+            Status = "Not Started", LatestVersionNumber = 2
+        };
+        _dataServiceMock.Setup(s => s.CreateJobVersionAsync("user-1", It.IsAny<Guid>(), It.IsAny<CreateVersionRequest>()))
+            .ReturnsAsync((metadata, null));
+
+        var result = await _controller.CreateJobVersionAsync(Guid.NewGuid(),
+            new CreateVersionRequest { Mode = "TranscriptionEdit", EditedMarkdown = "x" });
+
+        var accepted = Assert.IsType<AcceptedResult>(result);
+        var response = Assert.IsType<CreateVersionResponse>(accepted.Value);
+        response.LatestVersionNumber.Should().Be(2);
+        response.Status.Should().Be("Not Started");
+    }
+
+    [Fact]
+    public async Task RevertJobVersionAsync_WhenNotFound_Returns404()
+    {
+        SetUserContext("user@example.com", "user-1");
+        _dataServiceMock.Setup(s => s.RevertJobVersionAsync("user-1", It.IsAny<Guid>())).ReturnsAsync(false);
+
+        var result = await _controller.RevertJobVersionAsync(Guid.NewGuid());
+
+        Assert.IsType<NotFoundResult>(result);
+    }
+
+    [Fact]
+    public async Task RevertJobVersionAsync_HappyPath_Returns204()
+    {
+        SetUserContext("user@example.com", "user-1");
+        _dataServiceMock.Setup(s => s.RevertJobVersionAsync("user-1", It.IsAny<Guid>())).ReturnsAsync(true);
+
+        var result = await _controller.RevertJobVersionAsync(Guid.NewGuid());
+
+        Assert.IsType<NoContentResult>(result);
+    }
+
+    [Fact]
+    public async Task GetJobSourceAsync_WhenNotFound_Returns404()
+    {
+        SetUserContext("user@example.com", "user-1");
+        _dataServiceMock.Setup(s => s.GetJobSourceAsync("user-1", It.IsAny<Guid>(), "transcribed")).ReturnsAsync((string?)null);
+
+        var result = await _controller.GetJobSourceAsync(Guid.NewGuid(), "transcribed");
+
+        Assert.IsType<NotFoundResult>(result);
+    }
+
+    [Fact]
+    public async Task GetJobSourceAsync_HappyPath_Returns200WithContent()
+    {
+        SetUserContext("user@example.com", "user-1");
+        _dataServiceMock.Setup(s => s.GetJobSourceAsync("user-1", It.IsAny<Guid>(), "transcribed")).ReturnsAsync("raw markdown");
+
+        var result = await _controller.GetJobSourceAsync(Guid.NewGuid(), "transcribed");
+
+        var ok = Assert.IsType<OkObjectResult>(result);
+        ok.Value.Should().BeEquivalentTo(new { content = "raw markdown" });
+    }
+
+    #endregion
 }
 

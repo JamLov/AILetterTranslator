@@ -18,6 +18,7 @@ public class ProjectsController : ControllerBase
     private const int MaxNameLength = 250;
     private const int MaxDescriptionLength = 1000;
     private const int MaxNotesLength = 1000;
+    private const int MaxEditedMarkdownLength = 200 * 1024;
     private const long MaxFileSizeBytes = 4 * 1024 * 1024;
     private readonly string[] AllowedContentTypes = { "image/jpeg", "image/png" };
 
@@ -233,6 +234,84 @@ public class ProjectsController : ControllerBase
             return BadRequest(new { error = "InvalidToken", message = "Could not extract user ID from token." });
 
         var result = await _projectService.MoveJobToStandaloneAsync(userId, projectId, jobId);
+        if (!result) return NotFound();
+        return NoContent();
+    }
+
+    [HttpGet("{projectId}/jobs/{jobId}/versions")]
+    public async Task<IActionResult> GetProjectJobVersionsAsync(Guid projectId, Guid jobId)
+    {
+        var userId = GetUserId();
+        if (string.IsNullOrEmpty(userId))
+            return BadRequest(new { error = "InvalidToken", message = "Could not extract user ID from token." });
+
+        var versions = await _projectService.GetProjectJobVersionsAsync(userId, projectId, jobId);
+        if (versions == null) return NotFound();
+        return Ok(versions);
+    }
+
+    [HttpGet("{projectId}/jobs/{jobId}/versions/{versionNumber:int}")]
+    public async Task<IActionResult> GetProjectJobVersionAsync(Guid projectId, Guid jobId, int versionNumber)
+    {
+        var userId = GetUserId();
+        if (string.IsNullOrEmpty(userId))
+            return BadRequest(new { error = "InvalidToken", message = "Could not extract user ID from token." });
+
+        var detail = await _projectService.GetProjectJobVersionAsync(userId, projectId, jobId, versionNumber);
+        if (detail == null) return NotFound();
+        return Ok(detail);
+    }
+
+    [HttpGet("{projectId}/jobs/{jobId}/source/{source}")]
+    public async Task<IActionResult> GetProjectJobSourceAsync(Guid projectId, Guid jobId, string source)
+    {
+        var userId = GetUserId();
+        if (string.IsNullOrEmpty(userId))
+            return BadRequest(new { error = "InvalidToken", message = "Could not extract user ID from token." });
+
+        var content = await _projectService.GetProjectJobSourceAsync(userId, projectId, jobId, source);
+        if (content == null) return NotFound();
+        return Ok(new { content });
+    }
+
+    [HttpPost("{projectId}/jobs/{jobId}/versions")]
+    public async Task<IActionResult> CreateProjectJobVersionAsync(Guid projectId, Guid jobId, [FromBody] CreateVersionRequest request)
+    {
+        var userId = GetUserId();
+        if (string.IsNullOrEmpty(userId))
+            return BadRequest(new { error = "InvalidToken", message = "Could not extract user ID from token." });
+
+        if (request == null || string.IsNullOrWhiteSpace(request.EditedMarkdown))
+            return BadRequest(new { error = "InvalidRequest", message = "EditedMarkdown is required." });
+        if (request.EditedMarkdown.Length > MaxEditedMarkdownLength)
+            return BadRequest(new { error = "InvalidRequest", message = $"EditedMarkdown cannot exceed {MaxEditedMarkdownLength} characters." });
+        if (request.Notes != null && request.Notes.Length > MaxNotesLength)
+            return BadRequest(new { error = "InvalidRequest", message = $"Notes cannot exceed {MaxNotesLength} characters." });
+
+        var (metadata, error) = await _projectService.CreateProjectJobVersionAsync(userId, projectId, jobId, request);
+        return error switch
+        {
+            "InvalidMode" => BadRequest(new { error = "InvalidMode", message = "Mode must be TranscriptionEdit or TranslationEdit." }),
+            "Forbidden" => StatusCode(StatusCodes.Status403Forbidden, new { error = "Forbidden", message = "Only the project owner can create new job versions." }),
+            "NotFound" => NotFound(),
+            "Conflict" => Conflict(new { error = "Conflict", message = "Cannot create a new version while the job is In Progress." }),
+            null => Accepted(new CreateVersionResponse
+            {
+                LatestVersionNumber = metadata!.LatestVersionNumber!.Value,
+                Status = metadata.Status
+            }),
+            _ => StatusCode(StatusCodes.Status500InternalServerError)
+        };
+    }
+
+    [HttpPost("{projectId}/jobs/{jobId}/versions/revert")]
+    public async Task<IActionResult> RevertProjectJobVersionAsync(Guid projectId, Guid jobId)
+    {
+        var userId = GetUserId();
+        if (string.IsNullOrEmpty(userId))
+            return BadRequest(new { error = "InvalidToken", message = "Could not extract user ID from token." });
+
+        var result = await _projectService.RevertProjectJobVersionAsync(userId, projectId, jobId);
         if (!result) return NotFound();
         return NoContent();
     }

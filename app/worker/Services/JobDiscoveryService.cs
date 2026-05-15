@@ -85,9 +85,12 @@ public class JobDiscoveryService : IJobDiscoveryService
 
                 if (metadata != null && metadata.Status == "Not Started")
                 {
-                    results.Add(new PendingJob(jobDir, metadata.JobId, metadata.JobName, projectId, metadata.CreatedByUserId));
-                    _logger.LogInformation("Found pending job {JobId} ({JobName}), project: {ProjectId}",
-                        metadata.JobId, metadata.JobName, projectId ?? "standalone");
+                    results.Add(new PendingJob(
+                        jobDir, metadata.JobId, metadata.JobName, projectId, metadata.CreatedByUserId,
+                        metadata.PendingProcessingMode, metadata.BasedOnVersionNumber));
+                    _logger.LogInformation("Found pending job {JobId} ({JobName}), project: {ProjectId}, mode: {Mode}",
+                        metadata.JobId, metadata.JobName, projectId ?? "standalone",
+                        metadata.PendingProcessingMode ?? "Initial");
                 }
             }
             catch (Exception ex)

@@ -8,6 +8,16 @@ namespace LetterTranslation.Worker.Services;
 
 public class JobProcessorService : IJobProcessorService
 {
+    private const string TranscribedFile = "Transcribed.md";
+    private const string TranslatedFile = "Transcribed_Translated.md";
+    private const string TranslatedWithNotesFile = "Transcribed_Translated_With_Notes.md";
+    private const string NotesFile = "notes.txt";
+    private const string VersionsFolder = "versions";
+
+    private const string ModeInitial = "Initial";
+    private const string ModeTranscriptionEdit = "TranscriptionEdit";
+    private const string ModeTranslationEdit = "TranslationEdit";
+
     private readonly IStorageService _storageService;
     private readonly IGeminiService _geminiService;
     private readonly ILogger<JobProcessorService> _logger;
@@ -21,60 +31,29 @@ public class JobProcessorService : IJobProcessorService
 
     public async Task ProcessJobAsync(PendingJob job)
     {
-        _logger.LogInformation("Processing job {JobId} ({JobName}), project: {ProjectId}", job.JobId, job.JobName, job.ProjectId ?? "standalone");
+        var mode = job.PendingProcessingMode ?? ModeInitial;
+        _logger.LogInformation("Processing job {JobId} ({JobName}), project: {ProjectId}, mode: {Mode}, basedOn: {BasedOn}",
+            job.JobId, job.JobName, job.ProjectId ?? "standalone", mode, job.BasedOnVersionNumber?.ToString() ?? "(none)");
 
         try
         {
-            _logger.LogInformation("Job {JobId}: setting status to In Progress", job.JobId);
             await UpdateJobStatusAsync(job.JobDirectoryPath, "In Progress");
 
-            var filesPath = Path.Combine(job.JobDirectoryPath, "files");
-            var imageFilePaths = new List<string>();
-
-            if (await _storageService.DirectoryExistsAsync(filesPath))
+            switch (mode)
             {
-                var fileNames = await _storageService.GetFileNamesAsync(filesPath);
-                imageFilePaths.AddRange(
-                    fileNames.Where(f => f != null)
-                             .Select(f => Path.Combine(filesPath, f!)));
+                case ModeTranscriptionEdit:
+                    await ProcessTranscriptionEditAsync(job);
+                    break;
+                case ModeTranslationEdit:
+                    await ProcessTranslationEditAsync(job);
+                    break;
+                default:
+                    await ProcessInitialAsync(job);
+                    break;
             }
 
-            var notesPath = Path.Combine(job.JobDirectoryPath, "notes.txt");
-            string? notes = null;
-            if (await _storageService.FileExistsAsync(notesPath))
-            {
-                notes = await _storageService.ReadTextAsync(notesPath);
-            }
-
-            _logger.LogInformation("Job {JobId}: {FileCount} image(s), notes: {HasNotes}",
-                job.JobId, imageFilePaths.Count, notes != null ? "yes" : "no");
-
-            _logger.LogInformation("Job {JobId}: sending to Gemini for processing", job.JobId);
-            var result = await _geminiService.ProcessAsync(imageFilePaths, notes);
-
-            _logger.LogInformation("Job {JobId}: writing output files", job.JobId);
-            await _storageService.WriteTextAsync(
-                Path.Combine(job.JobDirectoryPath, "Transcribed.md"),
-                result.TranscribedMarkdown);
-
-            await _storageService.WriteTextAsync(
-                Path.Combine(job.JobDirectoryPath, "Transcribed_Translated.md"),
-                result.TranslatedMarkdown);
-
-            await _storageService.WriteTextAsync(
-                Path.Combine(job.JobDirectoryPath, "Transcribed_Translated_With_Notes.md"),
-                result.TranslatedWithNotesMarkdown);
-
-            if (result.LetterDate != null)
-            {
-                _logger.LogInformation("Job {JobId}: saving extracted letter date {LetterDate}", job.JobId, result.LetterDate);
-                await UpdateJobLetterDateAsync(job.JobDirectoryPath, result.LetterDate);
-            }
-
-            _logger.LogInformation("Job {JobId}: setting status to Finished", job.JobId);
             await UpdateJobStatusAsync(job.JobDirectoryPath, "Finished");
-
-            _logger.LogInformation("Job {JobId} completed successfully", job.JobId);
+            _logger.LogInformation("Job {JobId} completed successfully ({Mode})", job.JobId, mode);
         }
         catch (Exception ex)
         {
@@ -98,8 +77,90 @@ public class JobProcessorService : IJobProcessorService
                 }
             }
 
+            // Failure leaves PendingProcessingMode + BasedOnVersionNumber in place so the user
+            // can either Retry (re-runs the same edit mode) or Revert via the backend.
             await UpdateJobStatusAsync(job.JobDirectoryPath, "Failed", ex.Message);
         }
+    }
+
+    private async Task ProcessInitialAsync(PendingJob job)
+    {
+        var filesPath = Path.Combine(job.JobDirectoryPath, "files");
+        var imageFilePaths = new List<string>();
+
+        if (await _storageService.DirectoryExistsAsync(filesPath))
+        {
+            var fileNames = await _storageService.GetFileNamesAsync(filesPath);
+            imageFilePaths.AddRange(fileNames.Where(f => f != null).Select(f => Path.Combine(filesPath, f!)));
+        }
+
+        var notes = await ReadOptionalTextAsync(Path.Combine(job.JobDirectoryPath, NotesFile));
+
+        _logger.LogInformation("Job {JobId}: Initial mode with {FileCount} image(s), notes: {HasNotes}",
+            job.JobId, imageFilePaths.Count, notes != null ? "yes" : "no");
+
+        var result = await _geminiService.ProcessInitialAsync(imageFilePaths, notes);
+
+        await _storageService.WriteTextAsync(Path.Combine(job.JobDirectoryPath, TranscribedFile), result.TranscribedMarkdown);
+        await _storageService.WriteTextAsync(Path.Combine(job.JobDirectoryPath, TranslatedFile), result.TranslatedMarkdown);
+        await _storageService.WriteTextAsync(Path.Combine(job.JobDirectoryPath, TranslatedWithNotesFile), result.TranslatedWithNotesMarkdown);
+
+        if (result.LetterDate != null)
+        {
+            _logger.LogInformation("Job {JobId}: saving extracted letter date {LetterDate}", job.JobId, result.LetterDate);
+            await UpdateJobLetterDateAsync(job.JobDirectoryPath, result.LetterDate);
+        }
+    }
+
+    private async Task ProcessTranscriptionEditAsync(PendingJob job)
+    {
+        var editedTranscription = await _storageService.ReadTextAsync(Path.Combine(job.JobDirectoryPath, TranscribedFile));
+        var notes = await ReadOptionalTextAsync(Path.Combine(job.JobDirectoryPath, NotesFile));
+        var priorContextual = await ReadPriorContextualAsync(job);
+
+        _logger.LogInformation("Job {JobId}: TranscriptionEdit mode (transcription={Len} chars, prior context={HasPrior})",
+            job.JobId, editedTranscription.Length, priorContextual != null ? "yes" : "no");
+
+        var result = await _geminiService.ProcessTranscriptionEditAsync(editedTranscription, priorContextual, notes);
+
+        await _storageService.WriteTextAsync(Path.Combine(job.JobDirectoryPath, TranslatedFile), result.TranslatedMarkdown);
+        await _storageService.WriteTextAsync(Path.Combine(job.JobDirectoryPath, TranslatedWithNotesFile), result.TranslatedWithNotesMarkdown);
+        // LetterDate is preserved from the existing metadata — not re-extracted.
+    }
+
+    private async Task ProcessTranslationEditAsync(PendingJob job)
+    {
+        var transcription = await _storageService.ReadTextAsync(Path.Combine(job.JobDirectoryPath, TranscribedFile));
+        var editedTranslation = await _storageService.ReadTextAsync(Path.Combine(job.JobDirectoryPath, TranslatedFile));
+        var notes = await ReadOptionalTextAsync(Path.Combine(job.JobDirectoryPath, NotesFile));
+        var priorContextual = await ReadPriorContextualAsync(job);
+
+        _logger.LogInformation("Job {JobId}: TranslationEdit mode (translation={Len} chars, prior context={HasPrior})",
+            job.JobId, editedTranslation.Length, priorContextual != null ? "yes" : "no");
+
+        var result = await _geminiService.ProcessTranslationEditAsync(transcription, editedTranslation, priorContextual, notes);
+
+        await _storageService.WriteTextAsync(Path.Combine(job.JobDirectoryPath, TranslatedWithNotesFile), result.TranslatedWithNotesMarkdown);
+    }
+
+    private async Task<string?> ReadPriorContextualAsync(PendingJob job)
+    {
+        if (job.BasedOnVersionNumber == null) return null;
+
+        var path = Path.Combine(job.JobDirectoryPath, VersionsFolder, $"v{job.BasedOnVersionNumber}", TranslatedWithNotesFile);
+        if (!await _storageService.FileExistsAsync(path))
+        {
+            _logger.LogWarning("Job {JobId}: prior contextual translation not found at {Path}", job.JobId, path);
+            return null;
+        }
+
+        return await _storageService.ReadTextAsync(path);
+    }
+
+    private async Task<string?> ReadOptionalTextAsync(string path)
+    {
+        if (!await _storageService.FileExistsAsync(path)) return null;
+        return await _storageService.ReadTextAsync(path);
     }
 
     private async Task UpdateJobStatusAsync(string jobDirectoryPath, string status, string? errorMessage = null)

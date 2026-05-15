@@ -36,7 +36,11 @@ public class ProjectServiceTests
 
     private ProjectService CreateService(IConfiguration? config = null)
     {
-        return new ProjectService(_storageServiceMock.Object, _dataServiceMock.Object, config ?? _defaultConfig, _loggerMock.Object, _timeProvider);
+        var versionOps = new VersionOperations(
+            _storageServiceMock.Object,
+            _timeProvider,
+            Mock.Of<ILogger<VersionOperations>>());
+        return new ProjectService(_storageServiceMock.Object, _dataServiceMock.Object, config ?? _defaultConfig, _loggerMock.Object, _timeProvider, versionOps);
     }
 
     private string ProjectPath(Guid id) => Path.Combine("data", "projects", id.ToString());
@@ -1264,6 +1268,277 @@ public class ProjectServiceTests
         error.Should().BeNull();
         _storageServiceMock.Verify(s => s.WriteTextAsync(
             ProjectMetaPath(projectId), It.Is<string>(j => !j.Contains("member-1"))), Times.Once);
+    }
+
+    #endregion
+
+    #region Versioning
+
+    private string ProjectJobPath(Guid projectId, Guid jobId) =>
+        Path.Combine(ProjectJobsPath(projectId), jobId.ToString());
+
+    private void SetupProjectJob(Guid projectId, Guid jobId, JobMetadata jobMeta)
+    {
+        var jobDir = ProjectJobPath(projectId, jobId);
+        var metaPath = Path.Combine(jobDir, "metadata.json");
+        _storageServiceMock.Setup(s => s.DirectoryExistsAsync(jobDir)).ReturnsAsync(true);
+        _storageServiceMock.Setup(s => s.FileExistsAsync(metaPath)).ReturnsAsync(true);
+        _storageServiceMock.Setup(s => s.ReadTextAsync(metaPath))
+            .ReturnsAsync(JsonSerializer.Serialize(jobMeta, WriteOptions));
+    }
+
+    [Fact]
+    public async Task GetProjectJobVersionsAsync_WhenProjectNotFound_ReturnsNull()
+    {
+        var service = CreateService();
+        _storageServiceMock.Setup(s => s.FileExistsAsync(It.IsAny<string>())).ReturnsAsync(false);
+
+        var result = await service.GetProjectJobVersionsAsync("user-1", Guid.NewGuid(), Guid.NewGuid());
+
+        result.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task GetProjectJobVersionsAsync_WhenUserIsNotMember_ReturnsNull()
+    {
+        var service = CreateService();
+        var projectId = Guid.NewGuid();
+        SetupProjectMetadata(new ProjectMetadata
+        {
+            ProjectId = projectId, OwnerUserId = "owner",
+            MemberUserIds = new List<string>(), CreatedAt = DateTime.UtcNow
+        });
+
+        var result = await service.GetProjectJobVersionsAsync("stranger", projectId, Guid.NewGuid());
+
+        result.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task GetProjectJobVersionsAsync_WhenOwner_ReturnsCurrentEntry()
+    {
+        var service = CreateService();
+        var projectId = Guid.NewGuid();
+        var jobId = Guid.NewGuid();
+        SetupProjectMetadata(new ProjectMetadata
+        {
+            ProjectId = projectId, OwnerUserId = "owner",
+            MemberUserIds = new List<string>(), CreatedAt = DateTime.UtcNow
+        });
+        SetupProjectJob(projectId, jobId, new JobMetadata
+        {
+            JobId = jobId, JobName = "x", CreatedAt = DateTime.UtcNow, Status = "Finished"
+        });
+
+        var versions = (await service.GetProjectJobVersionsAsync("owner", projectId, jobId))!.ToList();
+
+        versions.Should().HaveCount(1);
+        versions[0].IsCurrent.Should().BeTrue();
+        versions[0].VersionNumber.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task GetProjectJobVersionsAsync_WhenMember_AlsoReturnsVersions()
+    {
+        var service = CreateService();
+        var projectId = Guid.NewGuid();
+        var jobId = Guid.NewGuid();
+        SetupProjectMetadata(new ProjectMetadata
+        {
+            ProjectId = projectId, OwnerUserId = "owner",
+            MemberUserIds = new List<string> { "member-1" }, CreatedAt = DateTime.UtcNow
+        });
+        SetupProjectJob(projectId, jobId, new JobMetadata
+        {
+            JobId = jobId, JobName = "x", CreatedAt = DateTime.UtcNow, Status = "Finished"
+        });
+
+        var versions = await service.GetProjectJobVersionsAsync("member-1", projectId, jobId);
+
+        versions.Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task GetProjectJobSourceAsync_WhenNonMember_ReturnsNull()
+    {
+        var service = CreateService();
+        var projectId = Guid.NewGuid();
+        SetupProjectMetadata(new ProjectMetadata
+        {
+            ProjectId = projectId, OwnerUserId = "owner",
+            MemberUserIds = new List<string>(), CreatedAt = DateTime.UtcNow
+        });
+
+        var result = await service.GetProjectJobSourceAsync("stranger", projectId, Guid.NewGuid(), "transcribed");
+
+        result.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task CreateProjectJobVersionAsync_InvalidMode_ReturnsInvalidMode()
+    {
+        var service = CreateService();
+        var (metadata, error) = await service.CreateProjectJobVersionAsync(
+            "owner", Guid.NewGuid(), Guid.NewGuid(),
+            new CreateVersionRequest { Mode = "BadMode", EditedMarkdown = "x" });
+
+        metadata.Should().BeNull();
+        error.Should().Be("InvalidMode");
+    }
+
+    [Fact]
+    public async Task CreateProjectJobVersionAsync_WhenMember_NotOwner_ReturnsForbidden()
+    {
+        var service = CreateService();
+        var projectId = Guid.NewGuid();
+        SetupProjectMetadata(new ProjectMetadata
+        {
+            ProjectId = projectId, OwnerUserId = "owner",
+            MemberUserIds = new List<string> { "member-1" }, CreatedAt = DateTime.UtcNow
+        });
+
+        var (metadata, error) = await service.CreateProjectJobVersionAsync(
+            "member-1", projectId, Guid.NewGuid(),
+            new CreateVersionRequest { Mode = "TranscriptionEdit", EditedMarkdown = "x" });
+
+        metadata.Should().BeNull();
+        error.Should().Be("Forbidden");
+    }
+
+    [Fact]
+    public async Task CreateProjectJobVersionAsync_WhenProjectMissing_ReturnsNotFound()
+    {
+        var service = CreateService();
+        _storageServiceMock.Setup(s => s.FileExistsAsync(It.IsAny<string>())).ReturnsAsync(false);
+
+        var (metadata, error) = await service.CreateProjectJobVersionAsync(
+            "owner", Guid.NewGuid(), Guid.NewGuid(),
+            new CreateVersionRequest { Mode = "TranscriptionEdit", EditedMarkdown = "x" });
+
+        metadata.Should().BeNull();
+        error.Should().Be("NotFound");
+    }
+
+    [Fact]
+    public async Task CreateProjectJobVersionAsync_InProgressJob_ReturnsConflict()
+    {
+        var service = CreateService();
+        var projectId = Guid.NewGuid();
+        var jobId = Guid.NewGuid();
+        SetupProjectMetadata(new ProjectMetadata
+        {
+            ProjectId = projectId, OwnerUserId = "owner",
+            MemberUserIds = new List<string>(), CreatedAt = DateTime.UtcNow
+        });
+        SetupProjectJob(projectId, jobId, new JobMetadata
+        {
+            JobId = jobId, JobName = "x", CreatedAt = DateTime.UtcNow,
+            Status = "In Progress", LatestVersionNumber = 1
+        });
+
+        var (metadata, error) = await service.CreateProjectJobVersionAsync(
+            "owner", projectId, jobId,
+            new CreateVersionRequest { Mode = "TranscriptionEdit", EditedMarkdown = "x" });
+
+        metadata.Should().BeNull();
+        error.Should().Be("Conflict");
+    }
+
+    [Fact]
+    public async Task CreateProjectJobVersionAsync_HappyPath_SnapshotsAndQueues()
+    {
+        var service = CreateService();
+        var projectId = Guid.NewGuid();
+        var jobId = Guid.NewGuid();
+        var jobDir = ProjectJobPath(projectId, jobId);
+
+        SetupProjectMetadata(new ProjectMetadata
+        {
+            ProjectId = projectId, OwnerUserId = "owner",
+            MemberUserIds = new List<string>(), CreatedAt = DateTime.UtcNow
+        });
+        SetupProjectJob(projectId, jobId, new JobMetadata
+        {
+            JobId = jobId, JobName = "Test", CreatedAt = DateTime.UtcNow,
+            Status = "Finished", LatestVersionNumber = 1, PendingProcessingMode = "Initial"
+        });
+
+        _storageServiceMock.Setup(s => s.FileExistsAsync(It.Is<string>(p => p.Contains(jobDir) && p.EndsWith(".md") && !p.Contains("versions")))).ReturnsAsync(true);
+        _storageServiceMock.Setup(s => s.FileExistsAsync(It.Is<string>(p => p.EndsWith("notes.txt") && !p.Contains("versions")))).ReturnsAsync(true);
+
+        var (metadata, error) = await service.CreateProjectJobVersionAsync(
+            "owner", projectId, jobId,
+            new CreateVersionRequest { Mode = "TranslationEdit", EditedMarkdown = "fixed translation" });
+
+        error.Should().BeNull();
+        metadata!.LatestVersionNumber.Should().Be(2);
+        metadata.PendingProcessingMode.Should().Be("TranslationEdit");
+        metadata.BasedOnVersionNumber.Should().Be(1);
+        metadata.Status.Should().Be("Not Started");
+
+        // Snapshot version.json written for v1
+        _storageServiceMock.Verify(s => s.WriteTextAsync(
+            Path.Combine(jobDir, "versions", "v1", "version.json"),
+            It.IsAny<string>()), Times.Once);
+        // Translation edit: root translated.md overwritten, with_notes deleted
+        _storageServiceMock.Verify(s => s.WriteTextAsync(
+            Path.Combine(jobDir, "Transcribed_Translated.md"), "fixed translation"), Times.Once);
+        _storageServiceMock.Verify(s => s.DeleteFileAsync(
+            Path.Combine(jobDir, "Transcribed_Translated_With_Notes.md")), Times.Once);
+    }
+
+    [Fact]
+    public async Task RevertProjectJobVersionAsync_WhenNotOwner_ReturnsFalse()
+    {
+        var service = CreateService();
+        var projectId = Guid.NewGuid();
+        SetupProjectMetadata(new ProjectMetadata
+        {
+            ProjectId = projectId, OwnerUserId = "owner",
+            MemberUserIds = new List<string> { "member-1" }, CreatedAt = DateTime.UtcNow
+        });
+
+        var result = await service.RevertProjectJobVersionAsync("member-1", projectId, Guid.NewGuid());
+
+        result.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task RevertProjectJobVersionAsync_HappyPath_RestoresPriorAndDecrements()
+    {
+        var service = CreateService();
+        var projectId = Guid.NewGuid();
+        var jobId = Guid.NewGuid();
+        var jobDir = ProjectJobPath(projectId, jobId);
+        var v1Dir = Path.Combine(jobDir, "versions", "v1");
+
+        SetupProjectMetadata(new ProjectMetadata
+        {
+            ProjectId = projectId, OwnerUserId = "owner",
+            MemberUserIds = new List<string>(), CreatedAt = DateTime.UtcNow
+        });
+        SetupProjectJob(projectId, jobId, new JobMetadata
+        {
+            JobId = jobId, JobName = "x", CreatedAt = DateTime.UtcNow,
+            Status = "Failed", LatestVersionNumber = 2,
+            PendingProcessingMode = "TranscriptionEdit", BasedOnVersionNumber = 1
+        });
+
+        _storageServiceMock.Setup(s => s.DirectoryExistsAsync(v1Dir)).ReturnsAsync(true);
+        _storageServiceMock.Setup(s => s.FileExistsAsync(Path.Combine(v1Dir, "version.json"))).ReturnsAsync(true);
+        _storageServiceMock.Setup(s => s.ReadTextAsync(Path.Combine(v1Dir, "version.json")))
+            .ReturnsAsync(JsonSerializer.Serialize(new VersionMetadata
+            { VersionNumber = 1, CreatedAt = DateTime.UtcNow, ProcessingMode = "Initial" }));
+        _storageServiceMock.Setup(s => s.FileExistsAsync(It.Is<string>(p => p.StartsWith(v1Dir)))).ReturnsAsync(true);
+
+        var result = await service.RevertProjectJobVersionAsync("owner", projectId, jobId);
+
+        result.Should().BeTrue();
+        _storageServiceMock.Verify(s => s.DeleteDirectoryAsync(v1Dir), Times.Once);
+        _storageServiceMock.Verify(s => s.WriteTextAsync(
+            Path.Combine(jobDir, "metadata.json"),
+            It.Is<string>(j => j.Contains("\"LatestVersionNumber\": 1")
+                && j.Contains("\"Status\": \"Finished\""))), Times.Once);
     }
 
     #endregion
