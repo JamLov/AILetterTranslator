@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, onMounted, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { api } from '../api';
 
@@ -8,11 +8,26 @@ interface JobMetadata {
   jobName: string;
   createdAt: string;
   status: string;
+  errorMessage: string | null;
   letterDate: string | null;
+  latestVersionNumber: number | null;
+  pendingProcessingMode: string | null;
+  basedOnVersionNumber: number | null;
 }
 
-interface JobDetail {
+interface VersionSummary {
+  versionNumber: number;
+  createdAt: string;
+  createdByUserId: string | null;
+  processingMode: string;
+  basedOnVersionNumber: number | null;
+  letterDate: string | null;
+  isCurrent: boolean;
+}
+
+interface JobView {
   metadata: JobMetadata;
+  version?: VersionSummary;        // present when viewing a historical version
   notes: string | null;
   originalFileNames: string[];
   transcribedHtml: string | null;
@@ -29,17 +44,109 @@ interface ProjectSummary {
 const route = useRoute();
 const router = useRouter();
 const projectId = computed(() => route.params.projectId as string | undefined);
-const job = ref<JobDetail | null>(null);
+const jobIdParam = computed(() => route.params.jobId as string);
+
+const job = ref<JobView | null>(null);
+const versions = ref<VersionSummary[]>([]);
 const isLoading = ref(true);
 const error = ref<string | null>(null);
 const activeTab = ref<'transcribed' | 'translated' | 'contextual'>('transcribed');
-const isProjectOwner = ref(true); // true for standalone jobs (user always owns them)
-const ownedProjects = ref<ProjectSummary[]>([]); // for move-to-project picker
+const isProjectOwner = ref(true);
+const ownedProjects = ref<ProjectSummary[]>([]);
 const selectedMoveProjectId = ref('');
 const isMoving = ref(false);
 const showMetadataDialog = ref(false);
 const editLetterDate = ref('');
 const isSavingMetadata = ref(false);
+const isResetting = ref(false);
+const isReverting = ref(false);
+
+// Create-version modal state
+const showCreateModal = ref(false);
+const editMode = ref<'TranscriptionEdit' | 'TranslationEdit' | null>(null);
+const editedMarkdown = ref('');
+const editedNotes = ref('');
+const isCreatingVersion = ref(false);
+const isLoadingSource = ref(false);
+const createVersionError = ref<string | null>(null);
+
+// Derived state
+const selectedVersionNumber = computed(() => {
+  const v = route.query.version;
+  if (typeof v === 'string') {
+    const n = parseInt(v, 10);
+    if (!Number.isNaN(n) && n > 0) return n;
+  }
+  return null;
+});
+
+const latestVersionNumber = computed(() => {
+  if (versions.value.length > 0) return versions.value[0].versionNumber;
+  return job.value?.metadata.latestVersionNumber ?? 1;
+});
+
+const isViewingHistoricalVersion = computed(() =>
+  selectedVersionNumber.value != null && selectedVersionNumber.value !== latestVersionNumber.value
+);
+
+const canEdit = computed(() =>
+  !isViewingHistoricalVersion.value
+  && isProjectOwner.value
+  && job.value?.metadata.status === 'Finished'
+);
+
+const isFailedEdit = computed(() =>
+  job.value?.metadata.status === 'Failed'
+  && !!job.value?.metadata.pendingProcessingMode
+  && job.value.metadata.pendingProcessingMode !== 'Initial'
+  && !isViewingHistoricalVersion.value
+);
+
+// URL builders
+const baseUrl = computed(() => projectId.value
+  ? `/api/projects/${projectId.value}/jobs/${jobIdParam.value}`
+  : `/api/jobs/${jobIdParam.value}`);
+
+const loadJob = async () => {
+  isLoading.value = true;
+  error.value = null;
+  try {
+    const versionToLoad = selectedVersionNumber.value;
+    const url = versionToLoad != null
+      ? `${baseUrl.value}/versions/${versionToLoad}`
+      : baseUrl.value;
+
+    const res = await api(url);
+    if (res.ok) {
+      job.value = await res.json();
+    } else if (res.status === 401) {
+      return;
+    } else if (res.status === 404) {
+      error.value = versionToLoad != null
+        ? `Version ${versionToLoad} not found.`
+        : 'The job you are looking for could not be found.';
+    } else {
+      throw new Error(`Server responded with ${res.status}`);
+    }
+  } catch (err) {
+    error.value = 'An error occurred while fetching the job details.';
+    console.error(err);
+  } finally {
+    isLoading.value = false;
+  }
+};
+
+const loadVersions = async () => {
+  try {
+    const res = await api(`${baseUrl.value}/versions`);
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data)) versions.value = data;
+    }
+  } catch (err) {
+    console.error('Could not load version list', err);
+  }
+};
 
 const openMetadataDialog = () => {
   editLetterDate.value = job.value?.metadata.letterDate || '';
@@ -49,11 +156,8 @@ const openMetadataDialog = () => {
 const saveMetadata = async () => {
   if (!job.value) return;
   isSavingMetadata.value = true;
-  const metadataUrl = projectId.value
-    ? `/api/projects/${projectId.value}/jobs/${job.value.metadata.jobId}/metadata`
-    : `/api/jobs/${job.value.metadata.jobId}/metadata`;
   try {
-    const res = await api(metadataUrl, {
+    const res = await api(`${baseUrl.value}/metadata`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ letterDate: editLetterDate.value || null })
@@ -71,78 +175,42 @@ const saveMetadata = async () => {
   }
 };
 
-const formatLetterDate = (dateString: string) => {
-  return new Date(dateString + 'T00:00:00').toLocaleDateString(undefined, {
+const formatLetterDate = (dateString: string) =>
+  new Date(dateString + 'T00:00:00').toLocaleDateString(undefined, {
     year: 'numeric', month: 'long', day: 'numeric'
   });
-};
 
-onMounted(async () => {
-  const jobId = route.params.jobId;
-  const apiUrl = projectId.value
-    ? `/api/projects/${projectId.value}/jobs/${jobId}`
-    : `/api/jobs/${jobId}`;
+const formatDate = (dateString: string) =>
+  new Date(dateString).toLocaleDateString(undefined, {
+    year: 'numeric', month: 'short', day: 'numeric'
+  });
 
-  try {
-    const res = await api(apiUrl);
-
-    if (res.ok) {
-      job.value = await res.json();
-    } else if (res.status === 401) {
-      return;
-    } else if (res.status === 404) {
-      error.value = "The job you are looking for could not be found.";
-    } else {
-      throw new Error(`Server responded with ${res.status}`);
-    }
-
-    if (projectId.value) {
-      // For project jobs, check if the user is the owner
-      const projectRes = await api(`/api/projects/${projectId.value}`);
-      if (projectRes.ok) {
-        const projectDetail = await projectRes.json();
-        isProjectOwner.value = projectDetail.isOwner;
-      }
-    } else {
-      // For standalone jobs, fetch projects the user owns (for move picker)
-      const projectsRes = await api('/api/projects');
-      if (projectsRes.ok) {
-        const all = await projectsRes.json() as ProjectSummary[];
-        ownedProjects.value = all.filter(p => p.isOwner);
-      }
-    }
-  } catch (err) {
-    error.value = 'An error occurred while fetching the job details.';
-    console.error(err);
-  } finally {
-    isLoading.value = false;
-  }
-});
-
-const formatDate = (dateString: string) => {
-  return new Date(dateString).toLocaleDateString(undefined, {
+const formatDateTime = (dateString: string) =>
+  new Date(dateString).toLocaleDateString(undefined, {
     year: 'numeric', month: 'long', day: 'numeric',
     hour: '2-digit', minute: '2-digit'
   });
-};
 
-const isResetting = ref(false);
+const modeLabel = (mode: string): string => {
+  switch (mode) {
+    case 'Initial': return 'Initial';
+    case 'TranscriptionEdit': return 'Transcription edit';
+    case 'TranslationEdit': return 'Translation edit';
+    default: return mode;
+  }
+};
 
 const resetJob = async () => {
   if (!job.value) return;
   isResetting.value = true;
-  const resetUrl = projectId.value
-    ? `/api/projects/${projectId.value}/jobs/${job.value.metadata.jobId}/reset`
-    : `/api/jobs/${job.value.metadata.jobId}/reset`;
   try {
-    const res = await api(resetUrl, {
-      method: 'POST'
-    });
+    const res = await api(`${baseUrl.value}/reset`, { method: 'POST' });
     if (res.ok) {
-      job.value.metadata.status = 'Not Started';
-      job.value.transcribedHtml = null;
-      job.value.translatedHtml = null;
-      job.value.translatedWithNotesHtml = null;
+      // For a Failed edit, Retry just re-queues without clearing pending fields,
+      // so the worker re-runs the same edit mode. For a normal reset on a
+      // Finished initial job, this falls back to Initial reprocessing.
+      await loadJob();
+      await loadVersions();
     } else {
       error.value = `Failed to reset job: ${res.status} ${res.statusText}`;
     }
@@ -153,15 +221,112 @@ const resetJob = async () => {
   }
 };
 
+const revertVersion = async () => {
+  if (!job.value) return;
+  const target = latestVersionNumber.value - 1;
+  if (target < 1) return;
+
+  if (!confirm(`Revert to v${target}? Your unsaved edit will be discarded and the job will return to its prior state.`)) return;
+
+  isReverting.value = true;
+  try {
+    const res = await api(`${baseUrl.value}/versions/revert`, { method: 'POST' });
+    if (res.ok) {
+      // Clear ?version=N if it pointed at the soon-to-be-deleted snapshot.
+      if (selectedVersionNumber.value != null) {
+        await router.replace({ query: {} });
+      }
+      await loadJob();
+      await loadVersions();
+    } else {
+      error.value = `Failed to revert: ${res.status} ${res.statusText}`;
+    }
+  } catch (err: any) {
+    error.value = `Failed to revert: ${err.message}`;
+  } finally {
+    isReverting.value = false;
+  }
+};
+
+const openCreateModal = async (mode: 'TranscriptionEdit' | 'TranslationEdit') => {
+  if (!job.value) return;
+  editMode.value = mode;
+  editedMarkdown.value = '';
+  editedNotes.value = job.value.notes || '';
+  createVersionError.value = null;
+  showCreateModal.value = true;
+
+  // Fetch raw markdown for the editor
+  isLoadingSource.value = true;
+  try {
+    const source = mode === 'TranscriptionEdit' ? 'transcribed' : 'translated';
+    const res = await api(`${baseUrl.value}/source/${source}`);
+    if (res.ok) {
+      const data = await res.json();
+      editedMarkdown.value = data.content || '';
+    } else {
+      createVersionError.value = `Could not load existing ${source} content (status ${res.status}).`;
+    }
+  } catch (err: any) {
+    createVersionError.value = `Could not load existing content: ${err.message}`;
+  } finally {
+    isLoadingSource.value = false;
+  }
+};
+
+const closeCreateModal = () => {
+  if (isCreatingVersion.value) return;
+  showCreateModal.value = false;
+  editMode.value = null;
+  editedMarkdown.value = '';
+  editedNotes.value = '';
+  createVersionError.value = null;
+};
+
+const submitCreateVersion = async () => {
+  if (!editMode.value || !editedMarkdown.value.trim()) {
+    createVersionError.value = 'Please enter the corrected content.';
+    return;
+  }
+
+  isCreatingVersion.value = true;
+  createVersionError.value = null;
+  try {
+    const res = await api(`${baseUrl.value}/versions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        mode: editMode.value,
+        editedMarkdown: editedMarkdown.value,
+        notes: editedNotes.value || null
+      })
+    });
+    if (res.status === 202) {
+      closeCreateModal();
+      await loadJob();
+      await loadVersions();
+    } else if (res.status === 409) {
+      createVersionError.value = 'Cannot create a new version while the job is currently processing. Please wait and try again.';
+    } else {
+      const data = await res.json().catch(() => null);
+      createVersionError.value = data?.message || `Failed: ${res.status} ${res.statusText}`;
+    }
+  } catch (err: any) {
+    createVersionError.value = `Failed to create version: ${err.message}`;
+  } finally {
+    isCreatingVersion.value = false;
+  }
+};
+
 const moveToProject = async () => {
   if (!job.value || !selectedMoveProjectId.value) return;
   isMoving.value = true;
   try {
-    const res = await api(`/api/jobs/${job.value.metadata.jobId}/move-to-project/${selectedMoveProjectId.value}`, {
+    const res = await api(`/api/jobs/${jobIdParam.value}/move-to-project/${selectedMoveProjectId.value}`, {
       method: 'POST'
     });
     if (res.ok) {
-      router.push({ name: 'project-job-detail', params: { projectId: selectedMoveProjectId.value, jobId: job.value.metadata.jobId } });
+      router.push({ name: 'project-job-detail', params: { projectId: selectedMoveProjectId.value, jobId: jobIdParam.value } });
     } else {
       const data = await res.json().catch(() => null);
       error.value = data?.message || `Failed to move job: ${res.status} ${res.statusText}`;
@@ -177,11 +342,11 @@ const moveToStandalone = async () => {
   if (!job.value || !projectId.value) return;
   isMoving.value = true;
   try {
-    const res = await api(`/api/projects/${projectId.value}/jobs/${job.value.metadata.jobId}/move-to-standalone`, {
+    const res = await api(`/api/projects/${projectId.value}/jobs/${jobIdParam.value}/move-to-standalone`, {
       method: 'POST'
     });
     if (res.ok) {
-      router.push({ name: 'job-detail', params: { jobId: job.value.metadata.jobId } });
+      router.push({ name: 'job-detail', params: { jobId: jobIdParam.value } });
     } else {
       const data = await res.json().catch(() => null);
       error.value = data?.message || `Failed to move job: ${res.status} ${res.statusText}`;
@@ -193,9 +358,20 @@ const moveToStandalone = async () => {
   }
 };
 
-const statusClass = (status: string) => {
-  return `pill pill-${status.toLowerCase().replace(' ', '-')}`;
+const selectVersion = (versionNumber: number) => {
+  if (versionNumber === latestVersionNumber.value) {
+    router.replace({ query: { ...route.query, version: undefined } });
+  } else {
+    router.replace({ query: { ...route.query, version: String(versionNumber) } });
+  }
 };
+
+const returnToCurrent = () => {
+  const { version: _, ...rest } = route.query;
+  router.replace({ query: rest });
+};
+
+const statusClass = (status: string) => `pill pill-${status.toLowerCase().replace(' ', '-')}`;
 
 const activeHtml = () => {
   if (!job.value) return null;
@@ -205,6 +381,28 @@ const activeHtml = () => {
     case 'contextual': return job.value.translatedWithNotesHtml;
   }
 };
+
+watch(() => route.query.version, () => loadJob());
+
+onMounted(async () => {
+  await Promise.all([loadJob(), loadVersions()]);
+
+  if (projectId.value) {
+    const projectRes = await api(`/api/projects/${projectId.value}`);
+    if (projectRes.ok) {
+      const projectDetail = await projectRes.json();
+      isProjectOwner.value = projectDetail.isOwner;
+    }
+  } else {
+    const projectsRes = await api('/api/projects');
+    if (projectsRes.ok) {
+      const all = await projectsRes.json();
+      if (Array.isArray(all)) {
+        ownedProjects.value = (all as ProjectSummary[]).filter(p => p.isOwner);
+      }
+    }
+  }
+});
 </script>
 
 <template>
@@ -221,10 +419,10 @@ const activeHtml = () => {
           </button>
           <h1 class="detail-title">{{ job.metadata.jobName }}</h1>
           <div class="detail-meta">
-            <span>{{ formatDate(job.metadata.createdAt) }}</span>
+            <span>{{ formatDateTime(job.metadata.createdAt) }}</span>
             <span :class="statusClass(job.metadata.status)">{{ job.metadata.status }}</span>
             <button
-              v-if="isProjectOwner && job.metadata.status !== 'Not Started' && job.metadata.status !== 'In Progress'"
+              v-if="!isViewingHistoricalVersion && !isFailedEdit && isProjectOwner && job.metadata.status !== 'Not Started' && job.metadata.status !== 'In Progress'"
               class="btn btn-secondary btn-sm"
               :disabled="isResetting"
               @click="resetJob"
@@ -237,10 +435,33 @@ const activeHtml = () => {
 
         <!-- Sidebar -->
         <aside class="detail-sidebar">
+          <!-- Versions browser -->
+          <div class="sidebar-block card">
+            <h3 class="sidebar-heading">Versions</h3>
+            <ul class="version-list">
+              <li
+                v-for="v in versions"
+                :key="v.versionNumber"
+                class="version-row"
+                :class="{
+                  'version-active': (selectedVersionNumber ?? latestVersionNumber) === v.versionNumber,
+                  'version-clickable': true
+                }"
+                @click="selectVersion(v.versionNumber)"
+              >
+                <div class="version-row-main">
+                  <span class="version-number">v{{ v.versionNumber }}</span>
+                  <span class="version-mode">{{ v.isCurrent ? '(current)' : modeLabel(v.processingMode) }}</span>
+                </div>
+                <div class="version-row-meta">{{ formatDate(v.createdAt) }}</div>
+              </li>
+            </ul>
+          </div>
+
           <div class="sidebar-block card">
             <div class="sidebar-heading-row">
               <h3 class="sidebar-heading">Metadata</h3>
-              <button v-if="isProjectOwner" class="edit-icon-btn" @click="openMetadataDialog" title="Edit metadata">
+              <button v-if="!isViewingHistoricalVersion && isProjectOwner" class="edit-icon-btn" @click="openMetadataDialog" title="Edit metadata">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                   <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
                   <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
@@ -288,7 +509,7 @@ const activeHtml = () => {
           </div>
 
           <!-- Move to Project (standalone jobs only) -->
-          <div v-if="!projectId && ownedProjects.length > 0" class="sidebar-block card">
+          <div v-if="!isViewingHistoricalVersion && !projectId && ownedProjects.length > 0" class="sidebar-block card">
             <h3 class="sidebar-heading">Move to Project</h3>
             <select v-model="selectedMoveProjectId" class="move-select" :disabled="isMoving">
               <option value="" disabled>Select a project...</option>
@@ -302,7 +523,7 @@ const activeHtml = () => {
           </div>
 
           <!-- Move to Standalone (project jobs, owner only) -->
-          <div v-if="projectId && isProjectOwner" class="sidebar-block card">
+          <div v-if="!isViewingHistoricalVersion && projectId && isProjectOwner" class="sidebar-block card">
             <h3 class="sidebar-heading">Move Job</h3>
             <button
               class="btn btn-secondary btn-sm"
@@ -314,6 +535,28 @@ const activeHtml = () => {
 
         <!-- Main content with tabs -->
         <main class="detail-main">
+          <!-- Historical-version banner -->
+          <div v-if="isViewingHistoricalVersion" class="version-banner">
+            Viewing version {{ selectedVersionNumber }} (read-only).
+            <button class="link-btn" @click="returnToCurrent">Return to current</button>
+          </div>
+
+          <!-- Failed-edit recovery banner -->
+          <div v-if="isFailedEdit" class="failed-banner">
+            <div class="failed-banner-msg">
+              <strong>{{ modeLabel(job.metadata.pendingProcessingMode || '') }} failed.</strong>
+              <span v-if="job.metadata.errorMessage"> {{ job.metadata.errorMessage }}</span>
+            </div>
+            <div class="failed-banner-actions">
+              <button class="btn btn-secondary btn-sm" :disabled="isResetting" @click="resetJob">
+                {{ isResetting ? 'Retrying...' : 'Retry' }}
+              </button>
+              <button class="btn btn-secondary btn-sm" :disabled="isReverting" @click="revertVersion">
+                {{ isReverting ? 'Reverting...' : `Revert to v${latestVersionNumber - 1}` }}
+              </button>
+            </div>
+          </div>
+
           <div class="card">
             <div class="tab-bar">
               <button
@@ -331,6 +574,18 @@ const activeHtml = () => {
                 :class="{ 'tab-active': activeTab === 'contextual' }"
                 @click="activeTab = 'contextual'"
               >Translation + Context</button>
+              <div class="tab-actions" v-if="canEdit">
+                <button
+                  v-if="activeTab === 'transcribed'"
+                  class="btn btn-secondary btn-sm"
+                  @click="openCreateModal('TranscriptionEdit')"
+                >Edit transcription</button>
+                <button
+                  v-else-if="activeTab === 'translated'"
+                  class="btn btn-secondary btn-sm"
+                  @click="openCreateModal('TranslationEdit')"
+                >Edit translation</button>
+              </div>
             </div>
             <div class="tab-content">
               <div v-if="activeHtml()" v-html="activeHtml()" class="markdown-content"></div>
@@ -338,6 +593,55 @@ const activeHtml = () => {
             </div>
           </div>
         </main>
+      </div>
+
+      <!-- Create-version modal -->
+      <div v-if="showCreateModal" class="dialog-overlay" @click.self="closeCreateModal">
+        <div class="dialog dialog-wide">
+          <h3 class="dialog-title">
+            {{ editMode === 'TranscriptionEdit' ? 'Edit transcription' : 'Edit translation' }}
+          </h3>
+          <p class="dialog-help">
+            Make corrections to the
+            {{ editMode === 'TranscriptionEdit' ? 'transcription' : 'translation' }}
+            below. On submit, Gemini will
+            {{ editMode === 'TranscriptionEdit'
+              ? 're-translate and re-add contextual notes, preserving prior context where text is unchanged.'
+              : 're-add contextual notes against your corrected translation, preserving prior context where text is unchanged.' }}
+          </p>
+
+          <div class="dialog-field">
+            <label class="dialog-label">{{ editMode === 'TranscriptionEdit' ? 'Transcription' : 'Translation' }} (Markdown)</label>
+            <textarea
+              v-model="editedMarkdown"
+              class="dialog-textarea"
+              :disabled="isCreatingVersion || isLoadingSource"
+              :placeholder="isLoadingSource ? 'Loading existing content...' : 'Edit the markdown content here...'"
+              rows="18"
+            ></textarea>
+          </div>
+
+          <div class="dialog-field">
+            <label class="dialog-label">Notes (optional, max 1000 chars)</label>
+            <textarea
+              v-model="editedNotes"
+              class="dialog-textarea"
+              :disabled="isCreatingVersion"
+              placeholder="Optional contextual notes for this version..."
+              maxlength="1000"
+              rows="4"
+            ></textarea>
+          </div>
+
+          <p v-if="createVersionError" class="dialog-error">{{ createVersionError }}</p>
+
+          <div class="dialog-actions">
+            <button class="btn btn-secondary btn-sm" @click="closeCreateModal" :disabled="isCreatingVersion">Cancel</button>
+            <button class="btn btn-primary btn-sm" @click="submitCreateVersion" :disabled="isCreatingVersion || isLoadingSource || !editedMarkdown.trim()">
+              {{ isCreatingVersion ? 'Submitting...' : 'Create new version' }}
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -444,9 +748,91 @@ const activeHtml = () => {
   min-width: 0;
 }
 
+/* Version list */
+.version-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.version-row {
+  padding: 8px 10px;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: background-color 0.1s ease;
+}
+.version-clickable:hover {
+  background: var(--color-surface-hover, rgba(0,0,0,0.05));
+}
+.version-active {
+  background: var(--color-primary-bg, rgba(99, 102, 241, 0.1));
+}
+.version-row-main {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 13px;
+}
+.version-number {
+  font-weight: 600;
+  color: var(--color-text);
+}
+.version-mode {
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+.version-row-meta {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  margin-top: 2px;
+}
+
+.version-banner {
+  background: var(--color-warning-bg, #fff7ed);
+  border: 1px solid var(--color-warning-border, #fdba74);
+  color: var(--color-warning, #9a3412);
+  padding: 10px 14px;
+  border-radius: var(--radius-md);
+  font-size: 13px;
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.link-btn {
+  background: none;
+  border: none;
+  color: var(--color-primary);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 13px;
+  padding: 0;
+  text-decoration: underline;
+}
+
+.failed-banner {
+  background: var(--color-danger-bg, #fef2f2);
+  border: 1px solid #fecaca;
+  color: var(--color-danger, #991b1b);
+  padding: 12px 14px;
+  border-radius: var(--radius-md);
+  font-size: 13px;
+  margin-bottom: 12px;
+}
+.failed-banner-msg {
+  margin-bottom: 8px;
+}
+.failed-banner-actions {
+  display: flex;
+  gap: 8px;
+}
+
 /* Tabs */
 .tab-bar {
   display: flex;
+  align-items: center;
   border-bottom: 1px solid var(--color-border);
   padding: 0 8px;
 }
@@ -468,6 +854,10 @@ const activeHtml = () => {
 .tab-active {
   color: var(--color-primary);
   border-bottom-color: var(--color-primary);
+}
+.tab-actions {
+  margin-left: auto;
+  padding: 6px 8px;
 }
 
 .tab-content {
@@ -562,15 +952,26 @@ const activeHtml = () => {
   padding: 24px;
   width: 360px;
   max-width: 90vw;
+  max-height: 90vh;
+  overflow-y: auto;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
+}
+.dialog-wide {
+  width: 720px;
 }
 .dialog-title {
   font-size: 16px;
   font-weight: 600;
-  margin-bottom: 20px;
+  margin-bottom: 12px;
+}
+.dialog-help {
+  font-size: 13px;
+  color: var(--color-text-muted);
+  line-height: 1.5;
+  margin-bottom: 16px;
 }
 .dialog-field {
-  margin-bottom: 20px;
+  margin-bottom: 16px;
 }
 .dialog-label {
   display: block;
@@ -595,6 +996,32 @@ const activeHtml = () => {
 .dialog-input:focus {
   outline: none;
   border-color: var(--color-primary);
+}
+.dialog-textarea {
+  width: 100%;
+  padding: 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  font-size: 13px;
+  font-family: 'Menlo', 'Consolas', 'Courier New', monospace;
+  line-height: 1.5;
+  color: var(--color-text);
+  background: var(--color-surface);
+  box-sizing: border-box;
+  resize: vertical;
+}
+.dialog-textarea:focus {
+  outline: none;
+  border-color: var(--color-primary);
+}
+.dialog-error {
+  background: var(--color-danger-bg, #fef2f2);
+  color: var(--color-danger, #991b1b);
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  font-size: 13px;
+  margin-bottom: 12px;
+  border: 1px solid #fecaca;
 }
 .dialog-actions {
   display: flex;
