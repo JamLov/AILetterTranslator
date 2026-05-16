@@ -1,0 +1,26 @@
+# Local Terraform working dirs / lockfiles
+.terraform/
+.terraform.lock.hcl
+crash.log
+crash.*.log
+
+# State files — must never be committed (contain plaintext secrets).
+*.tfstate
+*.tfstate.*
+*.tfstate.backup
+
+# Real values that contain secrets.
+terraform.tfvars
+*.auto.tfvars
+
+# NOTE: backend.tfvars is intentionally NOT gitignored — it only contains
+# resource identifiers (RG/SA/container names), no secrets. Committing it
+# means `terraform init -backend-config=backend.tfvars` works the same in
+# CI as it does locally, and new contributors don't need to re-bootstrap.
+
+# Plan output
+tfplan
+*.tfplan
+
+# Editor swap files
+*.swp

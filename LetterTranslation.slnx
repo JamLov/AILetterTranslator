@@ -19,5 +19,8 @@
       <Project Path="tests/worker/UnitTests/LetterTranslation.Worker.UnitTests.csproj" />
       <Project Path="tests/worker/IntegrationTests/LetterTranslation.Worker.IntegrationTests.csproj" />
     </Folder>
+    <Folder Name="/tests/tests-shared/">
+      <Project Path="tests/shared/UnitTests/LetterTranslation.Shared.UnitTests.csproj" />
+    </Folder>
   </Folder>
 </Solution>

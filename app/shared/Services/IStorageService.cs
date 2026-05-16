@@ -14,4 +14,5 @@ public interface IStorageService
     Task<byte[]> ReadBytesAsync(string path);
     Task MoveDirectoryAsync(string sourcePath, string destinationPath);
     Task DeleteDirectoryAsync(string path);
+    Task CopyFileAsync(string sourcePath, string destinationPath);
 }

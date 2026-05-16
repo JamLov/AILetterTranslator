@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import { ref, onUnmounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { useAuthStore } from '../stores/auth';
 import { useThemeStore } from '../stores/theme';
@@ -9,11 +9,36 @@ const authStore = useAuthStore();
 const themeStore = useThemeStore();
 const message = ref<string>('');
 const isLoggingIn = ref(false);
+const isWakingUp = ref(false);
+const starChar = ref('*');
+
+const starFrames = ['*', '\u2729', '\u2727', '\u2726', '\u2728', '\u2735', '\u2731', '\u273A', '\u2749', '\u2743'];
+let wakeTimeout: ReturnType<typeof setTimeout> | null = null;
+let starInterval: ReturnType<typeof setInterval> | null = null;
+let starIndex = 0;
+
+function startWakeAnimation() {
+  isWakingUp.value = true;
+  starInterval = setInterval(() => {
+    starIndex = (starIndex + 1) % starFrames.length;
+    starChar.value = starFrames[starIndex];
+  }, 150);
+}
+
+function stopWakeAnimation() {
+  if (wakeTimeout) { clearTimeout(wakeTimeout); wakeTimeout = null; }
+  if (starInterval) { clearInterval(starInterval); starInterval = null; }
+  isWakingUp.value = false;
+}
+
+onUnmounted(stopWakeAnimation);
 
 const callback = async (response: any) => {
   const credential = response.credential;
   isLoggingIn.value = true;
-  message.value = 'Signing in...';
+  message.value = '';
+
+  wakeTimeout = setTimeout(startWakeAnimation, 10000);
 
   try {
     const res = await fetch(`${import.meta.env.VITE_API_BASE_URL ?? ''}/api/login`, {
@@ -34,6 +59,7 @@ const callback = async (response: any) => {
   } catch (error: any) {
     message.value = `Error: ${error.message}`;
   } finally {
+    stopWakeAnimation();
     isLoggingIn.value = false;
   }
 };
@@ -55,7 +81,13 @@ const callback = async (response: any) => {
 
       <div class="login-action">
         <GoogleLogin :callback="callback" v-if="!isLoggingIn" />
-        <p v-if="isLoggingIn" class="login-loading">Signing in...</p>
+        <div v-if="isLoggingIn" class="login-status">
+          <p class="login-status-text">
+            <span v-if="!isWakingUp">signing in...</span>
+            <span v-else><span class="wake-star">{{ starChar }}</span> waking up from sleep... <span class="wake-star">{{ starChar }}</span></span>
+          </p>
+          <p v-if="isWakingUp" class="login-status-sub">hang tight, the server is stretching</p>
+        </div>
       </div>
 
       <div v-if="message && !isLoggingIn" class="login-error">
@@ -118,9 +150,28 @@ const callback = async (response: any) => {
   justify-content: center;
 }
 
-.login-loading {
+.login-status {
+  padding: 4px 0;
+}
+
+.login-status-text {
+  font-family: 'Courier New', Courier, monospace;
   font-size: 13px;
   color: var(--color-text-secondary);
+  letter-spacing: 0.5px;
+}
+
+.wake-star {
+  display: inline-block;
+  font-size: 14px;
+}
+
+.login-status-sub {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 11px;
+  color: var(--color-text-muted);
+  margin-top: 6px;
+  letter-spacing: 0.3px;
 }
 
 .login-error {

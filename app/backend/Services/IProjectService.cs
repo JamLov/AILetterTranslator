@@ -19,4 +19,11 @@ public interface IProjectService
     Task<bool> MoveJobToStandaloneAsync(string userId, Guid projectId, Guid jobId);
     Task<(bool success, string? error)> AddMemberByEmailAsync(string userId, Guid projectId, string email);
     Task<(bool success, string? error)> RemoveMemberByEmailAsync(string userId, Guid projectId, string email);
+
+    Task<IEnumerable<VersionSummary>?> GetProjectJobVersionsAsync(string userId, Guid projectId, Guid jobId);
+    Task<VersionDetail?> GetProjectJobVersionAsync(string userId, Guid projectId, Guid jobId, int versionNumber);
+    Task<string?> GetProjectJobSourceAsync(string userId, Guid projectId, Guid jobId, string source);
+    // error: null on success | "NotFound" | "Forbidden" | "Conflict" | "InvalidMode"
+    Task<(JobMetadata? metadata, string? error)> CreateProjectJobVersionAsync(string userId, Guid projectId, Guid jobId, CreateVersionRequest request);
+    Task<bool> RevertProjectJobVersionAsync(string userId, Guid projectId, Guid jobId);
 }

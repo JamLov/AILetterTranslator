@@ -12,15 +12,39 @@ public class DataService : IDataService
     private readonly IConfiguration _config;
     private readonly ILogger<DataService> _logger;
     private readonly TimeProvider _timeProvider;
+    private readonly VersionOperations _versionOperations;
     private readonly MarkdownPipeline _markdownPipeline;
 
-    public DataService(IStorageService storageService, IConfiguration config, ILogger<DataService> logger, TimeProvider timeProvider)
+    public DataService(IStorageService storageService, IConfiguration config, ILogger<DataService> logger, TimeProvider timeProvider, VersionOperations versionOperations)
     {
         _storageService = storageService;
         _config = config;
         _logger = logger;
         _timeProvider = timeProvider;
+        _versionOperations = versionOperations;
         _markdownPipeline = new MarkdownPipelineBuilder().UseAdvancedExtensions().Build();
+    }
+
+    private string GetJobDirectoryPath(string userId, Guid jobId)
+    {
+        var dataStoragePath = _config["DataStoragePath"] ?? "data";
+        return Path.Combine(dataStoragePath, "users", userId, "jobs", jobId.ToString());
+    }
+
+    private async Task<JobMetadata?> ReadMetadataAsync(string jobDirectoryPath)
+    {
+        var metadataPath = Path.Combine(jobDirectoryPath, "metadata.json");
+        if (!await _storageService.FileExistsAsync(metadataPath)) return null;
+
+        var json = await _storageService.ReadTextAsync(metadataPath);
+        return JsonSerializer.Deserialize<JobMetadata>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+    }
+
+    private async Task WriteMetadataAsync(string jobDirectoryPath, JobMetadata metadata)
+    {
+        var metadataPath = Path.Combine(jobDirectoryPath, "metadata.json");
+        var json = JsonSerializer.Serialize(metadata, new JsonSerializerOptions { WriteIndented = true });
+        await _storageService.WriteTextAsync(metadataPath, json);
     }
 
     public async Task InitializeUserWorkspaceAsync(string userId, string? email = null)
@@ -344,6 +368,133 @@ public class DataService : IDataService
         await _storageService.WriteTextAsync(metadataPath, updatedJson);
 
         _logger.LogInformation("Updated letter date for job {JobId} to {LetterDate}", jobId, letterDate ?? "(cleared)");
+        return true;
+    }
+
+    public async Task<IEnumerable<VersionSummary>?> GetJobVersionsAsync(string userId, Guid jobId)
+    {
+        var jobDir = GetJobDirectoryPath(userId, jobId);
+        if (!await _storageService.DirectoryExistsAsync(jobDir)) return null;
+
+        var metadata = await ReadMetadataAsync(jobDir);
+        if (metadata == null) return null;
+
+        return await _versionOperations.ListVersionsAsync(jobDir, metadata);
+    }
+
+    public async Task<VersionDetail?> GetJobVersionAsync(string userId, Guid jobId, int versionNumber)
+    {
+        var jobDir = GetJobDirectoryPath(userId, jobId);
+        if (!await _storageService.DirectoryExistsAsync(jobDir)) return null;
+
+        var metadata = await ReadMetadataAsync(jobDir);
+        if (metadata == null) return null;
+
+        return await _versionOperations.GetVersionDetailAsync(jobDir, metadata, versionNumber);
+    }
+
+    public async Task<string?> GetJobSourceAsync(string userId, Guid jobId, string source)
+    {
+        var jobDir = GetJobDirectoryPath(userId, jobId);
+        if (!await _storageService.DirectoryExistsAsync(jobDir)) return null;
+
+        return await _versionOperations.ReadSourceMarkdownAsync(jobDir, source);
+    }
+
+    public async Task<(JobMetadata? metadata, string? error)> CreateJobVersionAsync(string userId, Guid jobId, CreateVersionRequest request)
+    {
+        if (!VersionOperations.IsValidEditMode(request.Mode))
+            return (null, "InvalidMode");
+
+        var jobDir = GetJobDirectoryPath(userId, jobId);
+        if (!await _storageService.DirectoryExistsAsync(jobDir)) return (null, "NotFound");
+
+        var metadata = await ReadMetadataAsync(jobDir);
+        if (metadata == null) return (null, "NotFound");
+
+        if (string.Equals(metadata.Status, "In Progress", StringComparison.OrdinalIgnoreCase))
+            return (null, "Conflict");
+
+        var previousVersion = VersionOperations.CurrentVersionNumber(metadata);
+        var previousMode = metadata.PendingProcessingMode ?? VersionOperations.ModeInitial;
+        var previousBasedOn = metadata.BasedOnVersionNumber;
+        var previousLetterDate = metadata.LetterDate;
+        var previousCreatedBy = metadata.CreatedByUserId;
+        var previousCreatedAt = metadata.CreatedAt;
+
+        _logger.LogInformation("Creating new version for job {JobId}: prev=v{Prev} mode={Mode}",
+            jobId, previousVersion, request.Mode);
+
+        // Step 1: snapshot current root → versions/v{previousVersion}/
+        await _versionOperations.SnapshotCurrentToVersionFolderAsync(
+            jobDir,
+            previousVersion,
+            previousMode,
+            previousBasedOn,
+            previousLetterDate,
+            previousCreatedBy,
+            createdAt: previousCreatedAt);
+
+        // Step 2: stage user's edits to root, delete downstream stale outputs.
+        await _versionOperations.StageEditedInputsAsync(jobDir, request.Mode, request.EditedMarkdown, request.Notes);
+
+        // Step 3 (atomic queue): update metadata last.
+        metadata.LatestVersionNumber = previousVersion + 1;
+        metadata.PendingProcessingMode = request.Mode;
+        metadata.BasedOnVersionNumber = previousVersion;
+        metadata.Status = "Not Started";
+        metadata.ErrorMessage = null;
+
+        await WriteMetadataAsync(jobDir, metadata);
+
+        _logger.LogInformation("Queued v{Version} of job {JobId} for processing (mode={Mode}, basedOn=v{BasedOn})",
+            metadata.LatestVersionNumber, jobId, request.Mode, previousVersion);
+
+        return (metadata, null);
+    }
+
+    public async Task<bool> RevertJobVersionAsync(string userId, Guid jobId)
+    {
+        var jobDir = GetJobDirectoryPath(userId, jobId);
+        if (!await _storageService.DirectoryExistsAsync(jobDir)) return false;
+
+        var metadata = await ReadMetadataAsync(jobDir);
+        if (metadata == null) return false;
+
+        var current = VersionOperations.CurrentVersionNumber(metadata);
+        if (current <= 1) return false; // Nothing to revert to.
+
+        var revertTo = current - 1;
+        _logger.LogInformation("Reverting job {JobId} from v{Current} back to v{Target}", jobId, current, revertTo);
+
+        // Need to read the snapshot's version.json BEFORE deleting it to recover its mode/basedOn.
+        var snapshotVersionJsonPath = Path.Combine(jobDir, VersionOperations.VersionsFolder, $"v{revertTo}", VersionOperations.VersionMetadataFile);
+        VersionMetadata? snapshot = null;
+        if (await _storageService.FileExistsAsync(snapshotVersionJsonPath))
+        {
+            try
+            {
+                var json = await _storageService.ReadTextAsync(snapshotVersionJsonPath);
+                snapshot = JsonSerializer.Deserialize<VersionMetadata>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Could not read snapshot version.json at {Path}", snapshotVersionJsonPath);
+            }
+        }
+
+        await _versionOperations.RevertToVersionAsync(jobDir, revertTo);
+
+        metadata.LatestVersionNumber = revertTo;
+        metadata.PendingProcessingMode = snapshot?.ProcessingMode ?? VersionOperations.ModeInitial;
+        metadata.BasedOnVersionNumber = snapshot?.BasedOnVersionNumber;
+        metadata.LetterDate = snapshot?.LetterDateAtVersion ?? metadata.LetterDate;
+        metadata.Status = "Finished";
+        metadata.ErrorMessage = null;
+
+        await WriteMetadataAsync(jobDir, metadata);
+
+        _logger.LogInformation("Reverted job {JobId} to v{Target}", jobId, revertTo);
         return true;
     }
 }

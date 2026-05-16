@@ -38,3 +38,6 @@ node_modules/
 app/backend/logs/**
 docker/.env
 docker/data/
+infra/.env.azure
+infra/worker-yaml-tmp.yml
+data_backup/

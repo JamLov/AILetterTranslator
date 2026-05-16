@@ -312,5 +312,394 @@ public class JobsControllerTests
         Assert.IsType<NoContentResult>(result);
         _dataServiceMock.Verify(s => s.ResetJobAsync(userId, jobId), Times.Once);
     }
+
+    #region GetJobDetailAsync
+
+    [Fact]
+    public async Task GetJobDetailAsync_WhenUserIdMissing_ReturnsBadRequest()
+    {
+        SetUserContext("authorized@example.com", null);
+
+        var result = await _controller.GetJobDetailAsync(Guid.NewGuid());
+
+        Assert.IsType<BadRequestObjectResult>(result);
+    }
+
+    [Fact]
+    public async Task GetJobDetailAsync_WhenJobNotFound_ReturnsNotFound()
+    {
+        var userId = "user123";
+        SetUserContext("authorized@example.com", userId);
+        var jobId = Guid.NewGuid();
+
+        _dataServiceMock.Setup(s => s.GetJobDetailAsync(userId, jobId)).ReturnsAsync((JobDetail?)null);
+
+        var result = await _controller.GetJobDetailAsync(jobId);
+
+        Assert.IsType<NotFoundResult>(result);
+    }
+
+    [Fact]
+    public async Task GetJobDetailAsync_WhenFound_ReturnsOk()
+    {
+        var userId = "user123";
+        SetUserContext("authorized@example.com", userId);
+        var jobId = Guid.NewGuid();
+
+        var detail = new JobDetail
+        {
+            Metadata = new JobMetadata { JobId = jobId, JobName = "Test", Status = "Finished" },
+            OriginalFileNames = new List<string> { "test.jpg" }
+        };
+        _dataServiceMock.Setup(s => s.GetJobDetailAsync(userId, jobId)).ReturnsAsync(detail);
+
+        var result = await _controller.GetJobDetailAsync(jobId);
+
+        var okResult = Assert.IsType<OkObjectResult>(result);
+        okResult.Value.Should().Be(detail);
+    }
+
+    #endregion
+
+    #region UpdateJobMetadataAsync
+
+    [Fact]
+    public async Task UpdateJobMetadataAsync_WhenUserIdMissing_ReturnsBadRequest()
+    {
+        SetUserContext("authorized@example.com", null);
+
+        var result = await _controller.UpdateJobMetadataAsync(Guid.NewGuid(), new UpdateJobMetadataRequest());
+
+        Assert.IsType<BadRequestObjectResult>(result);
+    }
+
+    [Fact]
+    public async Task UpdateJobMetadataAsync_WhenInvalidDate_ReturnsBadRequest()
+    {
+        SetUserContext("authorized@example.com", "user123");
+
+        var result = await _controller.UpdateJobMetadataAsync(Guid.NewGuid(),
+            new UpdateJobMetadataRequest { LetterDate = "not-a-date" });
+
+        Assert.IsType<BadRequestObjectResult>(result);
+    }
+
+    [Fact]
+    public async Task UpdateJobMetadataAsync_WhenNotFound_ReturnsNotFound()
+    {
+        SetUserContext("authorized@example.com", "user123");
+        var jobId = Guid.NewGuid();
+        _dataServiceMock.Setup(s => s.UpdateJobLetterDateAsync("user123", jobId, "2026-01-15")).ReturnsAsync(false);
+
+        var result = await _controller.UpdateJobMetadataAsync(jobId,
+            new UpdateJobMetadataRequest { LetterDate = "2026-01-15" });
+
+        Assert.IsType<NotFoundResult>(result);
+    }
+
+    [Fact]
+    public async Task UpdateJobMetadataAsync_WhenSuccessful_ReturnsNoContent()
+    {
+        SetUserContext("authorized@example.com", "user123");
+        var jobId = Guid.NewGuid();
+        _dataServiceMock.Setup(s => s.UpdateJobLetterDateAsync("user123", jobId, "2026-01-15")).ReturnsAsync(true);
+
+        var result = await _controller.UpdateJobMetadataAsync(jobId,
+            new UpdateJobMetadataRequest { LetterDate = "2026-01-15" });
+
+        Assert.IsType<NoContentResult>(result);
+    }
+
+    [Fact]
+    public async Task UpdateJobMetadataAsync_WithNullDate_ReturnsNoContent()
+    {
+        SetUserContext("authorized@example.com", "user123");
+        var jobId = Guid.NewGuid();
+        _dataServiceMock.Setup(s => s.UpdateJobLetterDateAsync("user123", jobId, (string?)null)).ReturnsAsync(true);
+
+        var result = await _controller.UpdateJobMetadataAsync(jobId,
+            new UpdateJobMetadataRequest { LetterDate = null });
+
+        Assert.IsType<NoContentResult>(result);
+    }
+
+    #endregion
+
+    #region MoveToProjectAsync
+
+    [Fact]
+    public async Task MoveToProjectAsync_WhenUserIdMissing_ReturnsBadRequest()
+    {
+        SetUserContext("authorized@example.com", null);
+
+        var result = await _controller.MoveToProjectAsync(Guid.NewGuid(), Guid.NewGuid());
+
+        Assert.IsType<BadRequestObjectResult>(result);
+    }
+
+    [Fact]
+    public async Task MoveToProjectAsync_WhenNotFound_ReturnsNotFound()
+    {
+        SetUserContext("authorized@example.com", "user123");
+        _projectServiceMock.Setup(s => s.MoveJobToProjectAsync("user123", It.IsAny<Guid>(), It.IsAny<Guid>()))
+            .ReturnsAsync(false);
+
+        var result = await _controller.MoveToProjectAsync(Guid.NewGuid(), Guid.NewGuid());
+
+        Assert.IsType<NotFoundObjectResult>(result);
+    }
+
+    [Fact]
+    public async Task MoveToProjectAsync_WhenSuccessful_ReturnsNoContent()
+    {
+        SetUserContext("authorized@example.com", "user123");
+        var jobId = Guid.NewGuid();
+        var projectId = Guid.NewGuid();
+        _projectServiceMock.Setup(s => s.MoveJobToProjectAsync("user123", jobId, projectId)).ReturnsAsync(true);
+
+        var result = await _controller.MoveToProjectAsync(jobId, projectId);
+
+        Assert.IsType<NoContentResult>(result);
+    }
+
+    #endregion
+
+    #region DeleteJobAsync
+
+    [Fact]
+    public async Task DeleteJobAsync_WhenUserIdMissing_ReturnsBadRequest()
+    {
+        SetUserContext("authorized@example.com", null);
+
+        var result = await _controller.DeleteJobAsync(Guid.NewGuid());
+
+        Assert.IsType<BadRequestObjectResult>(result);
+    }
+
+    [Fact]
+    public async Task DeleteJobAsync_WhenNotFound_ReturnsNotFound()
+    {
+        SetUserContext("authorized@example.com", "user123");
+        var jobId = Guid.NewGuid();
+        _dataServiceMock.Setup(s => s.DeleteJobAsync("user123", jobId)).ReturnsAsync(false);
+
+        var result = await _controller.DeleteJobAsync(jobId);
+
+        Assert.IsType<NotFoundResult>(result);
+    }
+
+    [Fact]
+    public async Task DeleteJobAsync_WhenSuccessful_ReturnsNoContent()
+    {
+        SetUserContext("authorized@example.com", "user123");
+        var jobId = Guid.NewGuid();
+        _dataServiceMock.Setup(s => s.DeleteJobAsync("user123", jobId)).ReturnsAsync(true);
+
+        var result = await _controller.DeleteJobAsync(jobId);
+
+        Assert.IsType<NoContentResult>(result);
+    }
+
+    #endregion
+
+    #region CreateJobAsync - additional scenarios
+
+    [Fact]
+    public async Task CreateJobAsync_WhenDataServiceThrows_Returns500()
+    {
+        SetUserContext("authorized@example.com", "user123");
+        _userServiceMock.Setup(s => s.IsUserAllowed("authorized@example.com")).Returns(true);
+
+        var mockFile = new Mock<IFormFile>();
+        mockFile.Setup(f => f.FileName).Returns("test.jpg");
+        mockFile.Setup(f => f.Length).Returns(1024);
+        mockFile.Setup(f => f.ContentType).Returns("image/jpeg");
+
+        var request = new CreateJobRequest
+        {
+            JobName = "Test",
+            Files = new List<IFormFile> { mockFile.Object }
+        };
+        _dataServiceMock.Setup(s => s.CreateJobAsync("user123", request)).ThrowsAsync(new IOException("disk full"));
+
+        var result = await _controller.CreateJobAsync(request);
+
+        var objectResult = Assert.IsType<ObjectResult>(result);
+        objectResult.StatusCode.Should().Be(StatusCodes.Status500InternalServerError);
+    }
+
+    [Fact]
+    public async Task CreateJobAsync_WhenUserIdMissing_ReturnsBadRequest()
+    {
+        SetUserContext("authorized@example.com", null);
+        _userServiceMock.Setup(s => s.IsUserAllowed("authorized@example.com")).Returns(true);
+
+        var result = await _controller.CreateJobAsync(new CreateJobRequest { JobName = "Test" });
+
+        Assert.IsType<BadRequestObjectResult>(result);
+    }
+
+    #endregion
+
+    #region Versioning
+
+    [Fact]
+    public async Task GetJobVersionsAsync_WhenNotFound_Returns404()
+    {
+        SetUserContext("user@example.com", "user-1");
+        _dataServiceMock.Setup(s => s.GetJobVersionsAsync("user-1", It.IsAny<Guid>()))
+            .ReturnsAsync((IEnumerable<VersionSummary>?)null);
+
+        var result = await _controller.GetJobVersionsAsync(Guid.NewGuid());
+
+        Assert.IsType<NotFoundResult>(result);
+    }
+
+    [Fact]
+    public async Task GetJobVersionsAsync_HappyPath_ReturnsOk()
+    {
+        SetUserContext("user@example.com", "user-1");
+        var jobId = Guid.NewGuid();
+        var versions = new List<VersionSummary>
+        {
+            new() { VersionNumber = 2, IsCurrent = true, ProcessingMode = "TranscriptionEdit" },
+            new() { VersionNumber = 1, IsCurrent = false, ProcessingMode = "Initial" }
+        };
+        _dataServiceMock.Setup(s => s.GetJobVersionsAsync("user-1", jobId)).ReturnsAsync(versions);
+
+        var result = await _controller.GetJobVersionsAsync(jobId);
+
+        var ok = Assert.IsType<OkObjectResult>(result);
+        ok.Value.Should().BeEquivalentTo(versions);
+    }
+
+    [Fact]
+    public async Task CreateJobVersionAsync_WithEmptyEditedMarkdown_Returns400()
+    {
+        SetUserContext("user@example.com", "user-1");
+
+        var result = await _controller.CreateJobVersionAsync(Guid.NewGuid(),
+            new CreateVersionRequest { Mode = "TranscriptionEdit", EditedMarkdown = "  " });
+
+        Assert.IsType<BadRequestObjectResult>(result);
+    }
+
+    [Fact]
+    public async Task CreateJobVersionAsync_WithOversizedMarkdown_Returns400()
+    {
+        SetUserContext("user@example.com", "user-1");
+
+        var result = await _controller.CreateJobVersionAsync(Guid.NewGuid(),
+            new CreateVersionRequest { Mode = "TranscriptionEdit", EditedMarkdown = new string('x', 200 * 1024 + 1) });
+
+        Assert.IsType<BadRequestObjectResult>(result);
+    }
+
+    [Fact]
+    public async Task CreateJobVersionAsync_WhenInvalidMode_Returns400()
+    {
+        SetUserContext("user@example.com", "user-1");
+        _dataServiceMock.Setup(s => s.CreateJobVersionAsync("user-1", It.IsAny<Guid>(), It.IsAny<CreateVersionRequest>()))
+            .ReturnsAsync((null, "InvalidMode"));
+
+        var result = await _controller.CreateJobVersionAsync(Guid.NewGuid(),
+            new CreateVersionRequest { Mode = "Bad", EditedMarkdown = "x" });
+
+        Assert.IsType<BadRequestObjectResult>(result);
+    }
+
+    [Fact]
+    public async Task CreateJobVersionAsync_WhenNotFound_Returns404()
+    {
+        SetUserContext("user@example.com", "user-1");
+        _dataServiceMock.Setup(s => s.CreateJobVersionAsync("user-1", It.IsAny<Guid>(), It.IsAny<CreateVersionRequest>()))
+            .ReturnsAsync((null, "NotFound"));
+
+        var result = await _controller.CreateJobVersionAsync(Guid.NewGuid(),
+            new CreateVersionRequest { Mode = "TranscriptionEdit", EditedMarkdown = "x" });
+
+        Assert.IsType<NotFoundResult>(result);
+    }
+
+    [Fact]
+    public async Task CreateJobVersionAsync_WhenConflict_Returns409()
+    {
+        SetUserContext("user@example.com", "user-1");
+        _dataServiceMock.Setup(s => s.CreateJobVersionAsync("user-1", It.IsAny<Guid>(), It.IsAny<CreateVersionRequest>()))
+            .ReturnsAsync((null, "Conflict"));
+
+        var result = await _controller.CreateJobVersionAsync(Guid.NewGuid(),
+            new CreateVersionRequest { Mode = "TranscriptionEdit", EditedMarkdown = "x" });
+
+        Assert.IsType<ConflictObjectResult>(result);
+    }
+
+    [Fact]
+    public async Task CreateJobVersionAsync_HappyPath_Returns202WithLatestVersion()
+    {
+        SetUserContext("user@example.com", "user-1");
+        var metadata = new JobMetadata
+        {
+            JobId = Guid.NewGuid(), JobName = "x", CreatedAt = DateTime.UtcNow,
+            Status = "Not Started", LatestVersionNumber = 2
+        };
+        _dataServiceMock.Setup(s => s.CreateJobVersionAsync("user-1", It.IsAny<Guid>(), It.IsAny<CreateVersionRequest>()))
+            .ReturnsAsync((metadata, null));
+
+        var result = await _controller.CreateJobVersionAsync(Guid.NewGuid(),
+            new CreateVersionRequest { Mode = "TranscriptionEdit", EditedMarkdown = "x" });
+
+        var accepted = Assert.IsType<AcceptedResult>(result);
+        var response = Assert.IsType<CreateVersionResponse>(accepted.Value);
+        response.LatestVersionNumber.Should().Be(2);
+        response.Status.Should().Be("Not Started");
+    }
+
+    [Fact]
+    public async Task RevertJobVersionAsync_WhenNotFound_Returns404()
+    {
+        SetUserContext("user@example.com", "user-1");
+        _dataServiceMock.Setup(s => s.RevertJobVersionAsync("user-1", It.IsAny<Guid>())).ReturnsAsync(false);
+
+        var result = await _controller.RevertJobVersionAsync(Guid.NewGuid());
+
+        Assert.IsType<NotFoundResult>(result);
+    }
+
+    [Fact]
+    public async Task RevertJobVersionAsync_HappyPath_Returns204()
+    {
+        SetUserContext("user@example.com", "user-1");
+        _dataServiceMock.Setup(s => s.RevertJobVersionAsync("user-1", It.IsAny<Guid>())).ReturnsAsync(true);
+
+        var result = await _controller.RevertJobVersionAsync(Guid.NewGuid());
+
+        Assert.IsType<NoContentResult>(result);
+    }
+
+    [Fact]
+    public async Task GetJobSourceAsync_WhenNotFound_Returns404()
+    {
+        SetUserContext("user@example.com", "user-1");
+        _dataServiceMock.Setup(s => s.GetJobSourceAsync("user-1", It.IsAny<Guid>(), "transcribed")).ReturnsAsync((string?)null);
+
+        var result = await _controller.GetJobSourceAsync(Guid.NewGuid(), "transcribed");
+
+        Assert.IsType<NotFoundResult>(result);
+    }
+
+    [Fact]
+    public async Task GetJobSourceAsync_HappyPath_Returns200WithContent()
+    {
+        SetUserContext("user@example.com", "user-1");
+        _dataServiceMock.Setup(s => s.GetJobSourceAsync("user-1", It.IsAny<Guid>(), "transcribed")).ReturnsAsync("raw markdown");
+
+        var result = await _controller.GetJobSourceAsync(Guid.NewGuid(), "transcribed");
+
+        var ok = Assert.IsType<OkObjectResult>(result);
+        ok.Value.Should().BeEquivalentTo(new { content = "raw markdown" });
+    }
+
+    #endregion
 }
 

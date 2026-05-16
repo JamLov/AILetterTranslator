@@ -24,6 +24,15 @@ public class AzureBlobStorageService : IStorageService
         _logger.LogInformation("Azure Blob Storage initialized for container '{Container}'", containerName);
     }
 
+    /// <summary>
+    /// Internal constructor for unit testing — accepts a pre-configured BlobContainerClient.
+    /// </summary>
+    internal AzureBlobStorageService(ILogger<AzureBlobStorageService> logger, BlobContainerClient containerClient)
+    {
+        _logger = logger;
+        _containerClient = containerClient;
+    }
+
     private static string NormalizePath(string path)
     {
         return path.Replace('\\', '/').TrimStart('/');
@@ -187,5 +196,23 @@ public class AzureBlobStorageService : IStorageService
             _logger.LogInformation("Deleted blob '{Path}'", path);
         else
             _logger.LogDebug("Blob not found for deletion: '{Path}'", path);
+    }
+
+    public async Task CopyFileAsync(string sourcePath, string destinationPath)
+    {
+        var sourceBlob = _containerClient.GetBlobClient(NormalizePath(sourcePath));
+        var destBlob = _containerClient.GetBlobClient(NormalizePath(destinationPath));
+
+        await destBlob.StartCopyFromUriAsync(sourceBlob.Uri);
+
+        BlobProperties properties;
+        do
+        {
+            properties = (await destBlob.GetPropertiesAsync()).Value;
+            if (properties.CopyStatus == CopyStatus.Failed)
+                throw new InvalidOperationException($"Copy failed from '{sourcePath}' to '{destinationPath}': {properties.CopyStatusDescription}");
+        } while (properties.CopyStatus == CopyStatus.Pending);
+
+        _logger.LogInformation("Copied blob from '{Source}' to '{Destination}'", sourcePath, destinationPath);
     }
 }

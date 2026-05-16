@@ -95,7 +95,7 @@ public class WorkerIntegrationTests : IDisposable
         var discoveryService = new JobDiscoveryService(
             _storageService, _config, loggerFactory.CreateLogger<JobDiscoveryService>());
         var geminiMock = new Mock<IGeminiService>();
-        geminiMock.Setup(g => g.ProcessAsync(It.IsAny<IReadOnlyList<string>>(), It.IsAny<string?>()))
+        geminiMock.Setup(g => g.ProcessInitialAsync(It.IsAny<IReadOnlyList<string>>(), It.IsAny<string?>()))
             .ReturnsAsync(new GeminiResult("transcribed", "translated", "translated with notes"));
         var processorService = new JobProcessorService(
             _storageService, geminiMock.Object, loggerFactory.CreateLogger<JobProcessorService>());

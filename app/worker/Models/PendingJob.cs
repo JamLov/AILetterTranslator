@@ -5,5 +5,7 @@ public record PendingJob(
     Guid JobId,
     string JobName,
     string? ProjectId,
-    string? CreatedByUserId
+    string? CreatedByUserId,
+    string? PendingProcessingMode = null,
+    int? BasedOnVersionNumber = null
 );

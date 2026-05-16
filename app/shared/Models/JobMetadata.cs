@@ -10,4 +10,13 @@ public class JobMetadata
     public int OriginalFileCount { get; set; }
     public string? CreatedByUserId { get; set; }
     public string? LetterDate { get; set; }
+
+    public int? LatestVersionNumber { get; set; }
+
+    // Describes the latest version's production mode. Null is treated as "Initial".
+    // Set when a new version is queued; preserved on worker success/failure so the
+    // current version's mode is recoverable. Captured into versions/v{N-1}/version.json
+    // when the user creates v{N}.
+    public string? PendingProcessingMode { get; set; }
+    public int? BasedOnVersionNumber { get; set; }
 }

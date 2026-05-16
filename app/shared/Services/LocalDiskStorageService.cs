@@ -125,4 +125,16 @@ public class LocalDiskStorageService : IStorageService
         await content.CopyToAsync(fileStream);
         _logger.LogInformation("Wrote file stream to {Path}", path);
     }
+
+    public async Task CopyFileAsync(string sourcePath, string destinationPath)
+    {
+        var directory = Path.GetDirectoryName(destinationPath);
+        if (!string.IsNullOrEmpty(directory))
+        {
+            await EnsureDirectoryAsync(directory);
+        }
+
+        File.Copy(sourcePath, destinationPath, overwrite: true);
+        _logger.LogInformation("Copied file from {Source} to {Destination}", sourcePath, destinationPath);
+    }
 }

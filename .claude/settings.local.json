@@ -11,7 +11,19 @@
       "Bash(find:*)",
       "WebFetch(domain:github.com)",
       "WebSearch",
-      "WebFetch(domain:googleapis.github.io)"
+      "WebFetch(domain:googleapis.github.io)",
+      "WebFetch(domain:azure.microsoft.com)",
+      "Bash(pwsh generate-coverage.ps1)",
+      "Bash(dotnet build:*)",
+      "Bash(Get-ChildItem -Path \"D:\\\\GoogleDriveMirrors\\\\jameslovett\\\\Development\\\\BNJamesLov.LetterTranslation\\\\app\\\\frontend\\\\src\" -Recurse -Name)",
+      "Bash(Get-ChildItem -Path \"D:\\\\GoogleDriveMirrors\\\\jameslovett\\\\Development\\\\BNJamesLov.LetterTranslation\" -Recurse -Directory)",
+      "Bash(Select-Object -ExpandProperty FullName)",
+      "WebFetch(domain:support.claude.com)",
+      "Bash(dotnet restore *)",
+      "Bash(git add *)",
+      "Bash(npm run *)",
+      "Bash(git stash *)",
+      "Bash(git *)"
     ]
   }
 }

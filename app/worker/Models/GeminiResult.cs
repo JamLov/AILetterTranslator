@@ -6,3 +6,12 @@ public record GeminiResult(
     string TranslatedWithNotesMarkdown,
     string? LetterDate = null
 );
+
+public record TranscriptionEditResult(
+    string TranslatedMarkdown,
+    string TranslatedWithNotesMarkdown
+);
+
+public record TranslationEditResult(
+    string TranslatedWithNotesMarkdown
+);
