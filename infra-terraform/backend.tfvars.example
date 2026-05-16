@@ -1,0 +1,5 @@
+# Bootstrap.sh writes the real version of this file. Example only.
+resource_group_name  = "lt-tfstate-rg"
+storage_account_name = "lttfstate<suffix>"
+container_name       = "tfstate"
+key                  = "letter-translation.tfstate"
