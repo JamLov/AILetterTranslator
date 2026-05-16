@@ -1,5 +1,6 @@
 using LetterTranslation.Shared.Services;
 using LetterTranslation.Worker.Services;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -51,7 +52,7 @@ try
 
     if (pendingJobs.Count == 0)
     {
-        logger.LogInformation("No pending jobs found. Exiting.");
+        logger.LogInformation("No pending jobs found.");
     }
     else
     {
@@ -62,8 +63,46 @@ try
             await processorService.ProcessJobAsync(job);
         }
 
-        logger.LogInformation("All jobs processed. Exiting.");
+        logger.LogInformation("All pending jobs processed.");
     }
+
+    // Backfill pass: regenerate Transcribed_With_Notes.md for Finished jobs from before this feature.
+    // Bounded per run; failures never flip Status (degraded UI is acceptable, hard error is not).
+    var backfillEnabled = builder.Configuration.GetValue<bool>("Backfill:Enabled", true);
+    var backfillLimit = builder.Configuration.GetValue<int>("Backfill:MaxJobsPerRun", 5);
+
+    if (backfillEnabled && backfillLimit > 0)
+    {
+        var candidates = await discoveryService.FindJobsMissingTranscribedWithNotesAsync(backfillLimit);
+        if (candidates.Count == 0)
+        {
+            logger.LogInformation("Backfill: no Finished jobs missing Transcribed_With_Notes.md.");
+        }
+        else
+        {
+            int success = 0;
+            foreach (var job in candidates)
+            {
+                try
+                {
+                    await processorService.BackfillTranscribedWithNotesAsync(job);
+                    success++;
+                }
+                catch (Exception ex)
+                {
+                    logger.LogError(ex, "Backfill failed for job {JobId}; status unchanged, will retry next run", job.JobId);
+                }
+            }
+            logger.LogInformation("Backfilled {Success}/{Total} jobs missing Transcribed_With_Notes.md", success, candidates.Count);
+        }
+    }
+    else
+    {
+        logger.LogInformation("Backfill pass disabled (Backfill:Enabled={Enabled}, Backfill:MaxJobsPerRun={Limit}).",
+            backfillEnabled, backfillLimit);
+    }
+
+    logger.LogInformation("Worker run complete. Exiting.");
 }
 catch (Exception ex)
 {

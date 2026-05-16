@@ -33,6 +33,7 @@ interface JobView {
   transcribedHtml: string | null;
   translatedHtml: string | null;
   translatedWithNotesHtml: string | null;
+  transcribedWithNotesHtml: string | null;
 }
 
 interface ProjectSummary {
@@ -50,7 +51,7 @@ const job = ref<JobView | null>(null);
 const versions = ref<VersionSummary[]>([]);
 const isLoading = ref(true);
 const error = ref<string | null>(null);
-const activeTab = ref<'transcribed' | 'translated' | 'contextual'>('transcribed');
+const activeTab = ref<'transcribed' | 'translated' | 'contextual' | 'transcribed-contextual'>('transcribed');
 const isProjectOwner = ref(true);
 const ownedProjects = ref<ProjectSummary[]>([]);
 const selectedMoveProjectId = ref('');
@@ -385,6 +386,7 @@ const activeHtml = () => {
     case 'transcribed': return job.value.transcribedHtml;
     case 'translated': return job.value.translatedHtml;
     case 'contextual': return job.value.translatedWithNotesHtml;
+    case 'transcribed-contextual': return job.value.transcribedWithNotesHtml;
   }
 };
 
@@ -570,6 +572,11 @@ onMounted(async () => {
                 :class="{ 'tab-active': activeTab === 'transcribed' }"
                 @click="activeTab = 'transcribed'"
               >Transcription</button>
+              <button
+                class="tab"
+                :class="{ 'tab-active': activeTab === 'transcribed-contextual' }"
+                @click="activeTab = 'transcribed-contextual'"
+              >Transcription + Context</button>
               <button
                 class="tab"
                 :class="{ 'tab-active': activeTab === 'translated' }"

@@ -743,6 +743,8 @@ public class ProjectServiceTests
         _storageServiceMock.Setup(s => s.ReadTextAsync(Path.Combine(jobPath, "Transcribed.md"))).ReturnsAsync("# Hello");
         _storageServiceMock.Setup(s => s.FileExistsAsync(Path.Combine(jobPath, "Transcribed_Translated.md"))).ReturnsAsync(false);
         _storageServiceMock.Setup(s => s.FileExistsAsync(Path.Combine(jobPath, "Transcribed_Translated_With_Notes.md"))).ReturnsAsync(false);
+        _storageServiceMock.Setup(s => s.FileExistsAsync(Path.Combine(jobPath, "Transcribed_With_Notes.md"))).ReturnsAsync(true);
+        _storageServiceMock.Setup(s => s.ReadTextAsync(Path.Combine(jobPath, "Transcribed_With_Notes.md"))).ReturnsAsync("# Hello with context");
 
         var result = await service.GetProjectJobDetailAsync("user-1", projectId, jobId);
 
@@ -752,6 +754,7 @@ public class ProjectServiceTests
         result.OriginalFileNames.Should().Contain("img.jpg");
         result.TranscribedHtml.Should().Contain("Hello");
         result.TranslatedHtml.Should().BeNull();
+        result.TranscribedWithNotesHtml.Should().Contain("Hello with context");
     }
 
     #endregion

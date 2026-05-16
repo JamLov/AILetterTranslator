@@ -68,6 +68,90 @@ public class JobDiscoveryService : IJobDiscoveryService
         return pendingJobs;
     }
 
+    public async Task<IReadOnlyList<PendingJob>> FindJobsMissingTranscribedWithNotesAsync(int limit)
+    {
+        var dataStoragePath = _config["DataStoragePath"] ?? "data";
+        _logger.LogInformation("Backfill scan: looking for Finished jobs missing Transcribed_With_Notes.md in {DataStoragePath} (limit {Limit})",
+            dataStoragePath, limit);
+
+        var results = new List<PendingJob>();
+        if (limit <= 0) return results;
+
+        // Scan standalone jobs: /data/users/*/jobs/*
+        var usersPath = Path.Combine(dataStoragePath, "users");
+        if (await _storageService.DirectoryExistsAsync(usersPath))
+        {
+            foreach (var userDir in await _storageService.GetDirectoriesAsync(usersPath))
+            {
+                var jobsPath = Path.Combine(userDir, "jobs");
+                if (!await _storageService.DirectoryExistsAsync(jobsPath)) continue;
+
+                await ScanForBackfillAsync(jobsPath, projectId: null, limit, results);
+                if (results.Count >= limit) break;
+            }
+        }
+
+        // Scan project jobs: /data/projects/*/jobs/*
+        if (results.Count < limit)
+        {
+            var projectsPath = Path.Combine(dataStoragePath, "projects");
+            if (await _storageService.DirectoryExistsAsync(projectsPath))
+            {
+                foreach (var projectDir in await _storageService.GetDirectoriesAsync(projectsPath))
+                {
+                    var projectId = Path.GetFileName(projectDir);
+                    var jobsPath = Path.Combine(projectDir, "jobs");
+                    if (!await _storageService.DirectoryExistsAsync(jobsPath)) continue;
+
+                    await ScanForBackfillAsync(jobsPath, projectId, limit, results);
+                    if (results.Count >= limit) break;
+                }
+            }
+        }
+
+        _logger.LogInformation("Backfill scan: found {Count} candidate job(s)", results.Count);
+        return results;
+    }
+
+    private async Task ScanForBackfillAsync(string jobsPath, string? projectId, int limit, List<PendingJob> results)
+    {
+        foreach (var jobDir in await _storageService.GetDirectoriesAsync(jobsPath))
+        {
+            if (results.Count >= limit) return;
+
+            var metadataPath = Path.Combine(jobDir, "metadata.json");
+            if (!await _storageService.FileExistsAsync(metadataPath)) continue;
+
+            try
+            {
+                var json = await _storageService.ReadTextAsync(metadataPath);
+                var metadata = JsonSerializer.Deserialize<JobMetadata>(json, ReadOptions);
+                if (metadata == null || metadata.Status != "Finished") continue;
+
+                var transcribed = Path.Combine(jobDir, "Transcribed.md");
+                var translated = Path.Combine(jobDir, "Transcribed_Translated.md");
+                var translatedWithNotes = Path.Combine(jobDir, "Transcribed_Translated_With_Notes.md");
+                var transcribedWithNotes = Path.Combine(jobDir, "Transcribed_With_Notes.md");
+
+                if (!await _storageService.FileExistsAsync(transcribed)) continue;
+                if (!await _storageService.FileExistsAsync(translated)) continue;
+                if (!await _storageService.FileExistsAsync(translatedWithNotes)) continue;
+                if (await _storageService.FileExistsAsync(transcribedWithNotes)) continue;
+
+                results.Add(new PendingJob(
+                    jobDir, metadata.JobId, metadata.JobName, projectId, metadata.CreatedByUserId,
+                    metadata.PendingProcessingMode, metadata.BasedOnVersionNumber));
+
+                _logger.LogInformation("Backfill candidate: job {JobId} ({JobName}), project: {ProjectId}",
+                    metadata.JobId, metadata.JobName, projectId ?? "standalone");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Backfill scan: failed to read metadata from {MetadataPath}", metadataPath);
+            }
+        }
+    }
+
     private async Task<List<PendingJob>> ScanJobDirectoriesAsync(string jobsPath, string? projectId)
     {
         var results = new List<PendingJob>();

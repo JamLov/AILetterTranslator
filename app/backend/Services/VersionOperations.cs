@@ -11,6 +11,7 @@ public class VersionOperations
     public const string TranscribedFile = "Transcribed.md";
     public const string TranslatedFile = "Transcribed_Translated.md";
     public const string TranslatedWithNotesFile = "Transcribed_Translated_With_Notes.md";
+    public const string TranscribedWithNotesFile = "Transcribed_With_Notes.md";
     public const string NotesFile = "notes.txt";
     public const string VersionMetadataFile = "version.json";
     public const string VersionsFolder = "versions";
@@ -26,7 +27,8 @@ public class VersionOperations
     [
         TranscribedFile,
         TranslatedFile,
-        TranslatedWithNotesFile
+        TranslatedWithNotesFile,
+        TranscribedWithNotesFile
     ];
 
     private static readonly JsonSerializerOptions WriteOpts = new() { WriteIndented = true };
@@ -195,7 +197,8 @@ public class VersionOperations
             OriginalFileNames = originalFileNames,
             TranscribedHtml = await ReadAndConvertMdAsync(Path.Combine(versionDir, TranscribedFile)),
             TranslatedHtml = await ReadAndConvertMdAsync(Path.Combine(versionDir, TranslatedFile)),
-            TranslatedWithNotesHtml = await ReadAndConvertMdAsync(Path.Combine(versionDir, TranslatedWithNotesFile))
+            TranslatedWithNotesHtml = await ReadAndConvertMdAsync(Path.Combine(versionDir, TranslatedWithNotesFile)),
+            TranscribedWithNotesHtml = await ReadAndConvertMdAsync(Path.Combine(versionDir, TranscribedWithNotesFile))
         };
     }
 
@@ -275,11 +278,13 @@ public class VersionOperations
             await _storage.WriteTextAsync(Path.Combine(jobDirectoryPath, TranscribedFile), editedMarkdown);
             await _storage.DeleteFileAsync(Path.Combine(jobDirectoryPath, TranslatedFile));
             await _storage.DeleteFileAsync(Path.Combine(jobDirectoryPath, TranslatedWithNotesFile));
+            await _storage.DeleteFileAsync(Path.Combine(jobDirectoryPath, TranscribedWithNotesFile));
         }
         else if (mode == ModeTranslationEdit)
         {
             await _storage.WriteTextAsync(Path.Combine(jobDirectoryPath, TranslatedFile), editedMarkdown);
             await _storage.DeleteFileAsync(Path.Combine(jobDirectoryPath, TranslatedWithNotesFile));
+            await _storage.DeleteFileAsync(Path.Combine(jobDirectoryPath, TranscribedWithNotesFile));
         }
         else
         {

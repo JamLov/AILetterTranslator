@@ -5,4 +5,6 @@ namespace LetterTranslation.Worker.Services;
 public interface IJobProcessorService
 {
     Task ProcessJobAsync(PendingJob job);
+
+    Task BackfillTranscribedWithNotesAsync(PendingJob job);
 }

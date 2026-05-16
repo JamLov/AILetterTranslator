@@ -5,4 +5,6 @@ namespace LetterTranslation.Worker.Services;
 public interface IJobDiscoveryService
 {
     Task<IReadOnlyList<PendingJob>> FindPendingJobsAsync();
+
+    Task<IReadOnlyList<PendingJob>> FindJobsMissingTranscribedWithNotesAsync(int limit);
 }

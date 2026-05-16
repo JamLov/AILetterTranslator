@@ -396,6 +396,10 @@ public class DataServiceTests
         _storageServiceMock.Setup(s => s.ReadTextAsync(Path.Combine(jobPath, "Transcribed_Translated_With_Notes.md")))
             .ReturnsAsync("# Translation with Notes\nContextual text");
 
+        _storageServiceMock.Setup(s => s.FileExistsAsync(Path.Combine(jobPath, "Transcribed_With_Notes.md"))).ReturnsAsync(true);
+        _storageServiceMock.Setup(s => s.ReadTextAsync(Path.Combine(jobPath, "Transcribed_With_Notes.md")))
+            .ReturnsAsync("# Contextual Transcription\nSource text with notes");
+
         // Act
         var result = await service.GetJobDetailAsync("user-1", jobId);
 
@@ -409,6 +413,7 @@ public class DataServiceTests
         result.TranscribedHtml.Should().Contain("Transcription");
         result.TranslatedHtml.Should().Contain("Translation");
         result.TranslatedWithNotesHtml.Should().Contain("Translation with Notes");
+        result.TranscribedWithNotesHtml.Should().Contain("Contextual Transcription");
     }
 
     [Fact]
@@ -440,6 +445,7 @@ public class DataServiceTests
         _storageServiceMock.Setup(s => s.FileExistsAsync(Path.Combine(jobPath, "Transcribed.md"))).ReturnsAsync(false);
         _storageServiceMock.Setup(s => s.FileExistsAsync(Path.Combine(jobPath, "Transcribed_Translated.md"))).ReturnsAsync(false);
         _storageServiceMock.Setup(s => s.FileExistsAsync(Path.Combine(jobPath, "Transcribed_Translated_With_Notes.md"))).ReturnsAsync(false);
+        _storageServiceMock.Setup(s => s.FileExistsAsync(Path.Combine(jobPath, "Transcribed_With_Notes.md"))).ReturnsAsync(false);
 
         // Act
         var result = await service.GetJobDetailAsync("user-1", jobId);
@@ -450,6 +456,7 @@ public class DataServiceTests
         result.TranscribedHtml.Should().BeNull();
         result.TranslatedHtml.Should().BeNull();
         result.TranslatedWithNotesHtml.Should().BeNull();
+        result.TranscribedWithNotesHtml.Should().BeNull();
         result.OriginalFileNames.Should().ContainSingle("image.jpg");
     }
 

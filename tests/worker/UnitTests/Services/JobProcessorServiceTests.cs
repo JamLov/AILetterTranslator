@@ -372,6 +372,95 @@ public class JobProcessorServiceTests
         _storageMock.Verify(s => s.WriteTextAsync(translatedPath, It.IsAny<string>()), Times.Never);
     }
 
+    // -----------------------------------------------------------------------------------------
+    // BackfillTranscribedWithNotesAsync
+    // -----------------------------------------------------------------------------------------
+
+    [Fact]
+    public async Task BackfillTranscribedWithNotesAsync_WritesTranscribedWithNotesFile()
+    {
+        var transcribedPath = Path.Combine(_jobDir, "Transcribed.md");
+        var translatedWithNotesPath = Path.Combine(_jobDir, "Transcribed_Translated_With_Notes.md");
+        var targetPath = Path.Combine(_jobDir, "Transcribed_With_Notes.md");
+
+        _storageMock.Setup(s => s.ReadTextAsync(transcribedPath)).ReturnsAsync("source transcription");
+        _storageMock.Setup(s => s.ReadTextAsync(translatedWithNotesPath)).ReturnsAsync("annotated translation");
+        _storageMock.Setup(s => s.WriteTextAsync(It.IsAny<string>(), It.IsAny<string>())).Returns(Task.CompletedTask);
+
+        _geminiMock.Setup(g => g.ProcessTranscriptionContextAsync("source transcription", "annotated translation"))
+            .ReturnsAsync("contextual transcription output");
+
+        await _sut.BackfillTranscribedWithNotesAsync(CreatePendingJob());
+
+        _storageMock.Verify(s => s.WriteTextAsync(targetPath, "contextual transcription output"), Times.Once);
+        _geminiMock.Verify(g => g.ProcessTranscriptionContextAsync("source transcription", "annotated translation"), Times.Once);
+    }
+
+    [Fact]
+    public async Task BackfillTranscribedWithNotesAsync_DoesNotTouchMetadataJson()
+    {
+        var transcribedPath = Path.Combine(_jobDir, "Transcribed.md");
+        var translatedWithNotesPath = Path.Combine(_jobDir, "Transcribed_Translated_With_Notes.md");
+
+        _storageMock.Setup(s => s.ReadTextAsync(transcribedPath)).ReturnsAsync("t");
+        _storageMock.Setup(s => s.ReadTextAsync(translatedWithNotesPath)).ReturnsAsync("a");
+        _storageMock.Setup(s => s.WriteTextAsync(It.IsAny<string>(), It.IsAny<string>())).Returns(Task.CompletedTask);
+
+        _geminiMock.Setup(g => g.ProcessTranscriptionContextAsync(It.IsAny<string>(), It.IsAny<string>()))
+            .ReturnsAsync("ctx");
+
+        await _sut.BackfillTranscribedWithNotesAsync(CreatePendingJob());
+
+        // Status field is untouched: backfill must never read or write metadata.json.
+        _storageMock.Verify(s => s.ReadTextAsync(_metadataPath), Times.Never);
+        _storageMock.Verify(s => s.WriteTextAsync(_metadataPath, It.IsAny<string>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task BackfillTranscribedWithNotesAsync_StatusUnchanged_NoUpdateJobStatusCall()
+    {
+        // Same shape as the metadata-touch test, but framed around the absence of any Status mutation.
+        // UpdateJobStatusAsync is private; its observable side-effect is a write to metadata.json
+        // containing a "Status" field. We verify zero such writes occur on the backfill path.
+        var transcribedPath = Path.Combine(_jobDir, "Transcribed.md");
+        var translatedWithNotesPath = Path.Combine(_jobDir, "Transcribed_Translated_With_Notes.md");
+
+        _storageMock.Setup(s => s.ReadTextAsync(transcribedPath)).ReturnsAsync("t");
+        _storageMock.Setup(s => s.ReadTextAsync(translatedWithNotesPath)).ReturnsAsync("a");
+        _storageMock.Setup(s => s.WriteTextAsync(It.IsAny<string>(), It.IsAny<string>())).Returns(Task.CompletedTask);
+
+        _geminiMock.Setup(g => g.ProcessTranscriptionContextAsync(It.IsAny<string>(), It.IsAny<string>()))
+            .ReturnsAsync("ctx");
+
+        await _sut.BackfillTranscribedWithNotesAsync(CreatePendingJob());
+
+        _storageMock.Verify(
+            s => s.WriteTextAsync(It.IsAny<string>(), It.Is<string>(j => j.Contains("\"Status\""))),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task BackfillTranscribedWithNotesAsync_ThrowsWhenGeminiFails()
+    {
+        var transcribedPath = Path.Combine(_jobDir, "Transcribed.md");
+        var translatedWithNotesPath = Path.Combine(_jobDir, "Transcribed_Translated_With_Notes.md");
+
+        _storageMock.Setup(s => s.ReadTextAsync(transcribedPath)).ReturnsAsync("t");
+        _storageMock.Setup(s => s.ReadTextAsync(translatedWithNotesPath)).ReturnsAsync("a");
+
+        _geminiMock.Setup(g => g.ProcessTranscriptionContextAsync(It.IsAny<string>(), It.IsAny<string>()))
+            .ThrowsAsync(new InvalidOperationException("Gemini outage"));
+
+        var act = () => _sut.BackfillTranscribedWithNotesAsync(CreatePendingJob());
+
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("Gemini outage");
+
+        // No write to the target file when Gemini fails.
+        _storageMock.Verify(s => s.WriteTextAsync(
+            Path.Combine(_jobDir, "Transcribed_With_Notes.md"),
+            It.IsAny<string>()), Times.Never);
+    }
+
     [Fact]
     public async Task ProcessJobAsync_EditMode_OnFailure_DoesNotClearPendingFields()
     {

@@ -254,6 +254,7 @@ public class DataService : IDataService
         var transcribedMdPath = Path.Combine(jobDirectoryPath, "Transcribed.md");
         var translatedMdPath = Path.Combine(jobDirectoryPath, "Transcribed_Translated.md");
         var translatedWithNotesMdPath = Path.Combine(jobDirectoryPath, "Transcribed_Translated_With_Notes.md");
+        var transcribedWithNotesMdPath = Path.Combine(jobDirectoryPath, "Transcribed_With_Notes.md");
 
         async Task<string?> ReadAndConvertMdAsync(string path)
         {
@@ -270,7 +271,8 @@ public class DataService : IDataService
             OriginalFileNames = originalFileNames!,
             TranscribedHtml = await ReadAndConvertMdAsync(transcribedMdPath),
             TranslatedHtml = await ReadAndConvertMdAsync(translatedMdPath),
-            TranslatedWithNotesHtml = await ReadAndConvertMdAsync(translatedWithNotesMdPath)
+            TranslatedWithNotesHtml = await ReadAndConvertMdAsync(translatedWithNotesMdPath),
+            TranscribedWithNotesHtml = await ReadAndConvertMdAsync(transcribedWithNotesMdPath)
         };
 
         _logger.LogInformation("Job {JobId} detail loaded (status: {Status}, files: {FileCount}, has results: {HasResults})",
@@ -282,7 +284,8 @@ public class DataService : IDataService
     [
         "Transcribed.md",
         "Transcribed_Translated.md",
-        "Transcribed_Translated_With_Notes.md"
+        "Transcribed_Translated_With_Notes.md",
+        "Transcribed_With_Notes.md"
     ];
 
     public async Task<bool> ResetJobAsync(string userId, Guid jobId)
