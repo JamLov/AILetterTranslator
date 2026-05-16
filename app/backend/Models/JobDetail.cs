@@ -10,4 +10,5 @@ public class JobDetail
     public string? TranscribedHtml { get; set; }
     public string? TranslatedHtml { get; set; }
     public string? TranslatedWithNotesHtml { get; set; }
+    public string? TranscribedWithNotesHtml { get; init; }
 }

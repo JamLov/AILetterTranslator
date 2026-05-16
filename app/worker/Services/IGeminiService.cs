@@ -17,5 +17,9 @@ public interface IGeminiService
         string? priorContextualTranslation,
         string? notes);
 
+    Task<string> ProcessTranscriptionContextAsync(
+        string sourceTranscription,
+        string annotatedTranslation);
+
     Task<IReadOnlyList<string>> ListAvailableModelsAsync();
 }

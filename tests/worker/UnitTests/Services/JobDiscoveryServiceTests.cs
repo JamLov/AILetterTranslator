@@ -348,4 +348,180 @@ public class JobDiscoveryServiceTests
 
         result.Should().BeEmpty();
     }
+
+    // -----------------------------------------------------------------------------------------
+    // FindJobsMissingTranscribedWithNotesAsync (backfill scan)
+    // -----------------------------------------------------------------------------------------
+
+    private const string Transcribed = "Transcribed.md";
+    private const string Translated = "Transcribed_Translated.md";
+    private const string TranslatedWithNotes = "Transcribed_Translated_With_Notes.md";
+    private const string TranscribedWithNotes = "Transcribed_With_Notes.md";
+
+    private void SetupBackfillCandidate(string userOrProject, string ownerId, Guid jobId,
+        string status, bool hasTranscribed, bool hasTranslated, bool hasTranslatedWithNotes,
+        bool hasTranscribedWithNotes, bool isProject = false)
+    {
+        var jobDir = isProject ? ProjectJobDir(ownerId, jobId) : JobDir(ownerId, jobId);
+        var meta = JsonSerializer.Serialize(new JobMetadata
+        {
+            JobId = jobId, JobName = "Job " + jobId, Status = status, CreatedAt = DateTime.UtcNow
+        });
+        var metaPath = isProject ? ProjectMetadataPath(ownerId, jobId) : MetadataPath(ownerId, jobId);
+        _storageMock.Setup(s => s.FileExistsAsync(metaPath)).ReturnsAsync(true);
+        _storageMock.Setup(s => s.ReadTextAsync(metaPath)).ReturnsAsync(meta);
+        _storageMock.Setup(s => s.FileExistsAsync(Path.Combine(jobDir, Transcribed))).ReturnsAsync(hasTranscribed);
+        _storageMock.Setup(s => s.FileExistsAsync(Path.Combine(jobDir, Translated))).ReturnsAsync(hasTranslated);
+        _storageMock.Setup(s => s.FileExistsAsync(Path.Combine(jobDir, TranslatedWithNotes))).ReturnsAsync(hasTranslatedWithNotes);
+        _storageMock.Setup(s => s.FileExistsAsync(Path.Combine(jobDir, TranscribedWithNotes))).ReturnsAsync(hasTranscribedWithNotes);
+    }
+
+    [Fact]
+    public async Task FindJobsMissingTranscribedWithNotesAsync_ReturnsFinishedJobMissingFourthFile_InUserTree()
+    {
+        SetupNoProjects();
+        var jobId = Guid.NewGuid();
+        _storageMock.Setup(s => s.DirectoryExistsAsync(UsersPath)).ReturnsAsync(true);
+        _storageMock.Setup(s => s.GetDirectoriesAsync(UsersPath)).ReturnsAsync(new[] { UserDir("user1") });
+        _storageMock.Setup(s => s.DirectoryExistsAsync(UserJobsDir("user1"))).ReturnsAsync(true);
+        _storageMock.Setup(s => s.GetDirectoriesAsync(UserJobsDir("user1"))).ReturnsAsync(new[] { JobDir("user1", jobId) });
+        SetupBackfillCandidate("user1", "user1", jobId, "Finished",
+            hasTranscribed: true, hasTranslated: true, hasTranslatedWithNotes: true, hasTranscribedWithNotes: false);
+
+        var result = await _sut.FindJobsMissingTranscribedWithNotesAsync(10);
+
+        result.Should().HaveCount(1);
+        result[0].JobId.Should().Be(jobId);
+        result[0].ProjectId.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task FindJobsMissingTranscribedWithNotesAsync_ReturnsFinishedJobMissingFourthFile_InProjectTree()
+    {
+        SetupNoUsers();
+        var jobId = Guid.NewGuid();
+        _storageMock.Setup(s => s.DirectoryExistsAsync(ProjectsPath)).ReturnsAsync(true);
+        _storageMock.Setup(s => s.GetDirectoriesAsync(ProjectsPath)).ReturnsAsync(new[] { ProjectDir("proj1") });
+        _storageMock.Setup(s => s.DirectoryExistsAsync(ProjectJobsDir("proj1"))).ReturnsAsync(true);
+        _storageMock.Setup(s => s.GetDirectoriesAsync(ProjectJobsDir("proj1"))).ReturnsAsync(new[] { ProjectJobDir("proj1", jobId) });
+        SetupBackfillCandidate("proj1", "proj1", jobId, "Finished",
+            hasTranscribed: true, hasTranslated: true, hasTranslatedWithNotes: true, hasTranscribedWithNotes: false,
+            isProject: true);
+
+        var result = await _sut.FindJobsMissingTranscribedWithNotesAsync(10);
+
+        result.Should().HaveCount(1);
+        result[0].JobId.Should().Be(jobId);
+        result[0].ProjectId.Should().Be("proj1");
+    }
+
+    [Theory]
+    [InlineData("Not Started")]
+    [InlineData("In Progress")]
+    [InlineData("Failed")]
+    public async Task FindJobsMissingTranscribedWithNotesAsync_SkipsNonFinishedStatus(string status)
+    {
+        SetupNoProjects();
+        var jobId = Guid.NewGuid();
+        _storageMock.Setup(s => s.DirectoryExistsAsync(UsersPath)).ReturnsAsync(true);
+        _storageMock.Setup(s => s.GetDirectoriesAsync(UsersPath)).ReturnsAsync(new[] { UserDir("user1") });
+        _storageMock.Setup(s => s.DirectoryExistsAsync(UserJobsDir("user1"))).ReturnsAsync(true);
+        _storageMock.Setup(s => s.GetDirectoriesAsync(UserJobsDir("user1"))).ReturnsAsync(new[] { JobDir("user1", jobId) });
+        SetupBackfillCandidate("user1", "user1", jobId, status,
+            hasTranscribed: true, hasTranslated: true, hasTranslatedWithNotes: true, hasTranscribedWithNotes: false);
+
+        var result = await _sut.FindJobsMissingTranscribedWithNotesAsync(10);
+
+        result.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task FindJobsMissingTranscribedWithNotesAsync_SkipsJobsAlreadyHavingFourthFile()
+    {
+        SetupNoProjects();
+        var jobId = Guid.NewGuid();
+        _storageMock.Setup(s => s.DirectoryExistsAsync(UsersPath)).ReturnsAsync(true);
+        _storageMock.Setup(s => s.GetDirectoriesAsync(UsersPath)).ReturnsAsync(new[] { UserDir("user1") });
+        _storageMock.Setup(s => s.DirectoryExistsAsync(UserJobsDir("user1"))).ReturnsAsync(true);
+        _storageMock.Setup(s => s.GetDirectoriesAsync(UserJobsDir("user1"))).ReturnsAsync(new[] { JobDir("user1", jobId) });
+        SetupBackfillCandidate("user1", "user1", jobId, "Finished",
+            hasTranscribed: true, hasTranslated: true, hasTranslatedWithNotes: true, hasTranscribedWithNotes: true);
+
+        var result = await _sut.FindJobsMissingTranscribedWithNotesAsync(10);
+
+        result.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData(false, true, true)]   // missing Transcribed.md
+    [InlineData(true, false, true)]   // missing Transcribed_Translated.md
+    [InlineData(true, true, false)]   // missing Transcribed_Translated_With_Notes.md
+    public async Task FindJobsMissingTranscribedWithNotesAsync_SkipsWhenAnyPrimaryOutputMissing(
+        bool hasTranscribed, bool hasTranslated, bool hasTranslatedWithNotes)
+    {
+        SetupNoProjects();
+        var jobId = Guid.NewGuid();
+        _storageMock.Setup(s => s.DirectoryExistsAsync(UsersPath)).ReturnsAsync(true);
+        _storageMock.Setup(s => s.GetDirectoriesAsync(UsersPath)).ReturnsAsync(new[] { UserDir("user1") });
+        _storageMock.Setup(s => s.DirectoryExistsAsync(UserJobsDir("user1"))).ReturnsAsync(true);
+        _storageMock.Setup(s => s.GetDirectoriesAsync(UserJobsDir("user1"))).ReturnsAsync(new[] { JobDir("user1", jobId) });
+        SetupBackfillCandidate("user1", "user1", jobId, "Finished",
+            hasTranscribed, hasTranslated, hasTranslatedWithNotes, hasTranscribedWithNotes: false);
+
+        var result = await _sut.FindJobsMissingTranscribedWithNotesAsync(10);
+
+        result.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task FindJobsMissingTranscribedWithNotesAsync_RespectsLimit_BreaksEarly()
+    {
+        SetupNoProjects();
+        var job1 = Guid.NewGuid();
+        var job2 = Guid.NewGuid();
+        var job3 = Guid.NewGuid();
+        _storageMock.Setup(s => s.DirectoryExistsAsync(UsersPath)).ReturnsAsync(true);
+        _storageMock.Setup(s => s.GetDirectoriesAsync(UsersPath)).ReturnsAsync(new[] { UserDir("user1") });
+        _storageMock.Setup(s => s.DirectoryExistsAsync(UserJobsDir("user1"))).ReturnsAsync(true);
+        _storageMock.Setup(s => s.GetDirectoriesAsync(UserJobsDir("user1")))
+            .ReturnsAsync(new[] { JobDir("user1", job1), JobDir("user1", job2), JobDir("user1", job3) });
+
+        foreach (var id in new[] { job1, job2, job3 })
+        {
+            SetupBackfillCandidate("user1", "user1", id, "Finished",
+                hasTranscribed: true, hasTranslated: true, hasTranslatedWithNotes: true, hasTranscribedWithNotes: false);
+        }
+
+        var result = await _sut.FindJobsMissingTranscribedWithNotesAsync(2);
+
+        result.Should().HaveCount(2);
+    }
+
+    [Fact]
+    public async Task FindJobsMissingTranscribedWithNotesAsync_ZeroLimit_ReturnsEmptyWithoutScanning()
+    {
+        var result = await _sut.FindJobsMissingTranscribedWithNotesAsync(0);
+
+        result.Should().BeEmpty();
+        _storageMock.Verify(s => s.DirectoryExistsAsync(It.IsAny<string>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task FindJobsMissingTranscribedWithNotesAsync_LimitStopsBeforeReachingProjectTree()
+    {
+        // user tree alone already fills the limit; project tree must not be scanned at all.
+        var job1 = Guid.NewGuid();
+        _storageMock.Setup(s => s.DirectoryExistsAsync(UsersPath)).ReturnsAsync(true);
+        _storageMock.Setup(s => s.GetDirectoriesAsync(UsersPath)).ReturnsAsync(new[] { UserDir("user1") });
+        _storageMock.Setup(s => s.DirectoryExistsAsync(UserJobsDir("user1"))).ReturnsAsync(true);
+        _storageMock.Setup(s => s.GetDirectoriesAsync(UserJobsDir("user1"))).ReturnsAsync(new[] { JobDir("user1", job1) });
+        SetupBackfillCandidate("user1", "user1", job1, "Finished",
+            hasTranscribed: true, hasTranslated: true, hasTranslatedWithNotes: true, hasTranscribedWithNotes: false);
+
+        var result = await _sut.FindJobsMissingTranscribedWithNotesAsync(1);
+
+        result.Should().HaveCount(1);
+        // Project tree scan never invoked because limit already reached.
+        _storageMock.Verify(s => s.DirectoryExistsAsync(ProjectsPath), Times.Never);
+    }
 }

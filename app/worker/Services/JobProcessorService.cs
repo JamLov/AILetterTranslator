@@ -11,6 +11,7 @@ public class JobProcessorService : IJobProcessorService
     private const string TranscribedFile = "Transcribed.md";
     private const string TranslatedFile = "Transcribed_Translated.md";
     private const string TranslatedWithNotesFile = "Transcribed_Translated_With_Notes.md";
+    private const string TranscribedWithNotesFile = "Transcribed_With_Notes.md";
     private const string NotesFile = "notes.txt";
     private const string VersionsFolder = "versions";
 
@@ -105,6 +106,13 @@ public class JobProcessorService : IJobProcessorService
         await _storageService.WriteTextAsync(Path.Combine(job.JobDirectoryPath, TranslatedFile), result.TranslatedMarkdown);
         await _storageService.WriteTextAsync(Path.Combine(job.JobDirectoryPath, TranslatedWithNotesFile), result.TranslatedWithNotesMarkdown);
 
+        var transcribedWithNotes = await _geminiService.ProcessTranscriptionContextAsync(
+            result.TranscribedMarkdown,
+            result.TranslatedWithNotesMarkdown);
+        await _storageService.WriteTextAsync(
+            Path.Combine(job.JobDirectoryPath, TranscribedWithNotesFile),
+            transcribedWithNotes);
+
         if (result.LetterDate != null)
         {
             _logger.LogInformation("Job {JobId}: saving extracted letter date {LetterDate}", job.JobId, result.LetterDate);
@@ -125,6 +133,13 @@ public class JobProcessorService : IJobProcessorService
 
         await _storageService.WriteTextAsync(Path.Combine(job.JobDirectoryPath, TranslatedFile), result.TranslatedMarkdown);
         await _storageService.WriteTextAsync(Path.Combine(job.JobDirectoryPath, TranslatedWithNotesFile), result.TranslatedWithNotesMarkdown);
+
+        var transcribedWithNotes = await _geminiService.ProcessTranscriptionContextAsync(
+            editedTranscription,
+            result.TranslatedWithNotesMarkdown);
+        await _storageService.WriteTextAsync(
+            Path.Combine(job.JobDirectoryPath, TranscribedWithNotesFile),
+            transcribedWithNotes);
         // LetterDate is preserved from the existing metadata — not re-extracted.
     }
 
@@ -141,6 +156,30 @@ public class JobProcessorService : IJobProcessorService
         var result = await _geminiService.ProcessTranslationEditAsync(transcription, editedTranslation, priorContextual, notes);
 
         await _storageService.WriteTextAsync(Path.Combine(job.JobDirectoryPath, TranslatedWithNotesFile), result.TranslatedWithNotesMarkdown);
+
+        var transcribedWithNotes = await _geminiService.ProcessTranscriptionContextAsync(
+            transcription,
+            result.TranslatedWithNotesMarkdown);
+        await _storageService.WriteTextAsync(
+            Path.Combine(job.JobDirectoryPath, TranscribedWithNotesFile),
+            transcribedWithNotes);
+    }
+
+    public async Task BackfillTranscribedWithNotesAsync(PendingJob job)
+    {
+        _logger.LogInformation("Backfill: generating Transcribed_With_Notes.md for job {JobId} ({JobName})",
+            job.JobId, job.JobName);
+
+        var transcribed = await _storageService.ReadTextAsync(Path.Combine(job.JobDirectoryPath, TranscribedFile));
+        var annotatedTranslation = await _storageService.ReadTextAsync(Path.Combine(job.JobDirectoryPath, TranslatedWithNotesFile));
+
+        var transcribedWithNotes = await _geminiService.ProcessTranscriptionContextAsync(transcribed, annotatedTranslation);
+
+        await _storageService.WriteTextAsync(
+            Path.Combine(job.JobDirectoryPath, TranscribedWithNotesFile),
+            transcribedWithNotes);
+
+        _logger.LogInformation("Backfill: wrote Transcribed_With_Notes.md for job {JobId}", job.JobId);
     }
 
     private async Task<string?> ReadPriorContextualAsync(PendingJob job)

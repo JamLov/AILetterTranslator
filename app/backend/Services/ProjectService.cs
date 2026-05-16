@@ -23,7 +23,8 @@ public class ProjectService : IProjectService
     [
         "Transcribed.md",
         "Transcribed_Translated.md",
-        "Transcribed_Translated_With_Notes.md"
+        "Transcribed_Translated_With_Notes.md",
+        "Transcribed_With_Notes.md"
     ];
 
     public ProjectService(IStorageService storageService, IDataService dataService, IConfiguration config, ILogger<ProjectService> logger, TimeProvider timeProvider, VersionOperations versionOperations)
@@ -364,7 +365,8 @@ public class ProjectService : IProjectService
             OriginalFileNames = originalFileNames!,
             TranscribedHtml = await ReadAndConvertMdAsync(Path.Combine(jobDirectoryPath, "Transcribed.md")),
             TranslatedHtml = await ReadAndConvertMdAsync(Path.Combine(jobDirectoryPath, "Transcribed_Translated.md")),
-            TranslatedWithNotesHtml = await ReadAndConvertMdAsync(Path.Combine(jobDirectoryPath, "Transcribed_Translated_With_Notes.md"))
+            TranslatedWithNotesHtml = await ReadAndConvertMdAsync(Path.Combine(jobDirectoryPath, "Transcribed_Translated_With_Notes.md")),
+            TranscribedWithNotesHtml = await ReadAndConvertMdAsync(Path.Combine(jobDirectoryPath, "Transcribed_With_Notes.md"))
         };
     }
 

@@ -41,3 +41,4 @@ docker/data/
 infra/.env.azure
 infra/worker-yaml-tmp.yml
 data_backup/
+.copilot-tracking/
