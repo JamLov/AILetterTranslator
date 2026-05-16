@@ -574,6 +574,11 @@ onMounted(async () => {
               >Transcription</button>
               <button
                 class="tab"
+                :class="{ 'tab-active': activeTab === 'transcribed-contextual' }"
+                @click="activeTab = 'transcribed-contextual'"
+              >Transcription + Context</button>
+              <button
+                class="tab"
                 :class="{ 'tab-active': activeTab === 'translated' }"
                 @click="activeTab = 'translated'"
               >Translation</button>
@@ -582,11 +587,6 @@ onMounted(async () => {
                 :class="{ 'tab-active': activeTab === 'contextual' }"
                 @click="activeTab = 'contextual'"
               >Translation + Context</button>
-              <button
-                class="tab"
-                :class="{ 'tab-active': activeTab === 'transcribed-contextual' }"
-                @click="activeTab = 'transcribed-contextual'"
-              >Transcription + Context</button>
               <div class="tab-actions" v-if="canEdit">
                 <button
                   v-if="activeTab === 'transcribed'"
