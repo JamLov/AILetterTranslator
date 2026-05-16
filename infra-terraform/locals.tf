@@ -20,6 +20,11 @@ locals {
   frontend_image = "${local.acr_name}.azurecr.io/lt-frontend:${var.image_tag}"
   worker_image   = "${local.acr_name}.azurecr.io/lt-worker:${var.image_tag}"
 
+  # Azure auto-generates the ACR password secret name when you pass registry
+  # creds to `az containerapp create`. Pattern: "<acr>azurecrio-<acr>".
+  # Matching this avoids a secret-rename diff on every plan.
+  registry_password_secret = "${local.acr_name}azurecrio-${local.acr_name}"
+
   # Allowed-users CSV -> indexed env-var pairs (AllowedUsers__0, __1, ...)
   allowed_users_list = split(",", var.allowed_users)
   allowed_users_env = {

@@ -42,12 +42,12 @@ import {
 
 import {
   to = azurerm_key_vault_secret.gemini_api_key
-  id = "https://${local.keyvault_name}.vault.azure.net/secrets/GeminiApiKey"
+  id = "https://${local.keyvault_name}.vault.azure.net/secrets/GeminiApiKey/3d797da37213445498ea359e2c61ad78"
 }
 
 import {
   to = azurerm_key_vault_secret.blob_conn_string
-  id = "https://${local.keyvault_name}.vault.azure.net/secrets/AzureBlobConnectionString"
+  id = "https://${local.keyvault_name}.vault.azure.net/secrets/AzureBlobConnectionString/8cd0289b11cc47f19d668c967ca6e697"
 }
 
 import {
