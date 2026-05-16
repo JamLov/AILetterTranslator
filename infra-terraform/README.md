@@ -1,8 +1,8 @@
 # Terraform POC — Letter Translation infrastructure
 
-Proof-of-concept Terraform configuration that owns the same Azure resources
-as `infra/deploy.sh`. The image build (ACR Tasks) and version-discovery loop
-stay in a small wrapper script — Terraform owns everything else.
+Terraform configuration that owns the Letter Translation Azure infrastructure.
+The image build (ACR Tasks) and version-discovery loop live in
+`../infra/release.sh` — Terraform owns everything else.
 
 ## Layout
 
@@ -12,7 +12,7 @@ infra-terraform/
 ├── bootstrap/
 │   └── bootstrap.sh        # one-time: creates state RG/SA/container, writes backend.tfvars
 ├── providers.tf            # azurerm provider + remote state backend
-├── locals.tf               # derived names (matches deploy.sh suffix)
+├── locals.tf               # derived names (same SHA-256 suffix release.sh uses)
 ├── variables.tf            # inputs (image_tag, secrets, etc.)
 ├── main.tf                 # all infra resources
 ├── imports.tf              # import blocks to absorb existing Azure resources
@@ -53,7 +53,7 @@ infra-terraform/
 
 5. **Import the existing resources**
    The `imports.tf` file contains `import` blocks for every resource
-   `deploy.sh` creates. On the first plan, Terraform will plan the imports.
+   the original `deploy.sh` created. On the first plan, Terraform will plan the imports.
    ```sh
    terraform plan -out tfplan
    ```
@@ -84,14 +84,51 @@ infra-terraform/
 
 ## Future releases (new container image version)
 
-The Terraform config takes `image_tag` as a variable. The release loop is:
+Use the build wrapper in `../infra/release.sh`. It is the only thing you run
+to roll out a new version:
 
-1. CI (or a small wrapper script) discovers next version, runs `az acr build`
-   with `:vX.Y.Z` + `:latest` tags — same logic as the current `deploy.sh`
-   step 6.
-2. CI runs `terraform apply -var="image_tag=v0.0.N"`.
-3. Terraform diffs only the image fields on the three container resources
-   and triggers new revisions. Everything else stays put.
+```sh
+cd ../infra && ./release.sh
+```
+
+That script does three things in sequence:
+
+1. Queries ACR for the highest existing `v0.0.N` tag across the three repos
+   and computes the next `N`.
+2. `az acr build` for backend, worker, frontend with both `:vN` and `:latest`
+   tags.
+3. `terraform apply -auto-approve -var image_tag=v0.0.N` here in
+   `infra-terraform/`. Only the three container resources diff (image fields
+   change), and Terraform triggers fresh revisions for each.
+
+### What's actually deployed?
+
+The committed `image_tag` default in `variables.tf` is `"latest"` — that's a
+fallback, not a record. The **deployed version lives in Terraform state**,
+not in the codebase. Query it:
+
+```sh
+terraform output deployed_image_tag
+```
+
+### Optional: make the deployed version visible in the codebase
+
+If you want `git log` to be the release history (e.g. when you move to
+GitHub Actions and want the running version reviewable in PRs), commit a
+`release.auto.tfvars`:
+
+```hcl
+# infra-terraform/release.auto.tfvars   <-- COMMIT this file
+image_tag = "v0.0.5"
+```
+
+Terraform auto-loads any `*.auto.tfvars` in the working directory, so this
+file overrides the default. `release.sh` (or the GH Action) rewrites the
+file with the new tag after each successful build and commits it. The
+repo then always reflects what's running, at the cost of one extra commit
+per release.
+
+Not enabled by default — keep things simple until you actually need it.
 
 ## What Terraform does NOT own
 

@@ -15,9 +15,8 @@ variable "image_tag" {
 }
 
 variable "google_client_id" {
-  description = "Google OAuth client ID (also baked into frontend at build time, separate var there)."
+  description = "Google OAuth client ID. Not actually secret — it's baked into the frontend JS bundle and visible to any browser. Leaving it un-sensitive matches what `az containerapp create --env-vars` produced."
   type        = string
-  sensitive   = true
 }
 
 variable "allowed_users" {

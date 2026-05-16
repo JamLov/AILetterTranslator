@@ -9,7 +9,7 @@ set -euo pipefail
 
 RESOURCE_GROUP="lt-rg"
 
-# Derive Key Vault name (same logic as deploy.sh)
+# Derive Key Vault name (same SHA-256 suffix logic used elsewhere)
 SUB_ID=$(az account show --query "id" -o tsv)
 SUFFIX=$(printf '%s' "$SUB_ID" | openssl dgst -sha256 2>/dev/null | sed 's/.*= //' | cut -c1-6)
 KEYVAULT_NAME="lt-kv-${SUFFIX}"
@@ -30,4 +30,5 @@ az keyvault purge --name "$KEYVAULT_NAME" --output none 2>/dev/null || true
 
 echo ""
 echo "Resource group deleted and Key Vault purged."
-echo "You can redeploy from scratch with: ./deploy.sh"
+echo "You can redeploy from scratch via the Terraform flow in ../infra-terraform/."
+echo "See ../infra-terraform/README.md for the bootstrap + apply sequence."
