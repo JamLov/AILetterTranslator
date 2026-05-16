@@ -274,13 +274,19 @@ const openCreateModal = async (mode: 'TranscriptionEdit' | 'TranslationEdit') =>
   }
 };
 
-const closeCreateModal = () => {
-  if (isCreatingVersion.value) return;
+const resetCreateModalState = () => {
   showCreateModal.value = false;
   editMode.value = null;
   editedMarkdown.value = '';
   editedNotes.value = '';
   createVersionError.value = null;
+};
+
+const closeCreateModal = () => {
+  // Guards the user-initiated close paths (Cancel button, backdrop click) while a
+  // submit is in flight. The success path uses resetCreateModalState() directly.
+  if (isCreatingVersion.value) return;
+  resetCreateModalState();
 };
 
 const submitCreateVersion = async () => {
@@ -302,7 +308,7 @@ const submitCreateVersion = async () => {
       })
     });
     if (res.status === 202) {
-      closeCreateModal();
+      resetCreateModalState();
       await loadJob();
       await loadVersions();
     } else if (res.status === 409) {

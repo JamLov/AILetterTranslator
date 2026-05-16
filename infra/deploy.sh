@@ -241,27 +241,59 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Step 6: Build & Push Docker Images (cloud-side via ACR Tasks)
+# Step 6: Determine next version + build & push Docker images
 # ---------------------------------------------------------------------------
-echo ">> Step 6: Building Docker images via ACR Tasks..."
-echo "   Building backend..."
+# Returns the highest existing v0.0.N tag in a single repo, as a bare integer.
+# Returns 0 if the repo doesn't exist yet or has no matching tags.
+get_max_version_in_repo() {
+    local repo=$1
+    local tags
+    tags=$(azq acr repository show-tags --name "$ACR_NAME" --repository "$repo" --output tsv 2>/dev/null || true)
+
+    if [[ -z "$tags" ]]; then
+        echo "0"
+        return
+    fi
+
+    local max
+    max=$(echo "$tags" | grep -E '^v0\.0\.[0-9]+$' | sed 's/^v0\.0\.//' | sort -n | tail -1 || true)
+    echo "${max:-0}"
+}
+
+echo ">> Step 6: Determining next image version..."
+MAX_VERSION=0
+for repo in lt-backend lt-frontend lt-worker; do
+    v=$(get_max_version_in_repo "$repo")
+    echo "   ${repo}: max existing version = v0.0.${v}"
+    if [[ "$v" -gt "$MAX_VERSION" ]]; then
+        MAX_VERSION=$v
+    fi
+done
+NEW_VERSION=$((MAX_VERSION + 1))
+IMAGE_TAG="v0.0.${NEW_VERSION}"
+echo "   Next version: $IMAGE_TAG (will also retag as :latest)"
+
+echo "   Building backend ($IMAGE_TAG)..."
 az acr build \
     --registry "$ACR_NAME" \
-    --image lt-backend:latest \
+    --image "lt-backend:${IMAGE_TAG}" \
+    --image "lt-backend:latest" \
     --file "$WIN_PROJECT_ROOT/app/backend/Dockerfile" \
     "$WIN_PROJECT_ROOT/app/"
 
-echo "   Building worker..."
+echo "   Building worker ($IMAGE_TAG)..."
 az acr build \
     --registry "$ACR_NAME" \
-    --image lt-worker:latest \
+    --image "lt-worker:${IMAGE_TAG}" \
+    --image "lt-worker:latest" \
     --file "$WIN_PROJECT_ROOT/app/worker/Dockerfile" \
     "$WIN_PROJECT_ROOT/app/"
 
-echo "   Building frontend..."
+echo "   Building frontend ($IMAGE_TAG)..."
 az acr build \
     --registry "$ACR_NAME" \
-    --image lt-frontend:latest \
+    --image "lt-frontend:${IMAGE_TAG}" \
+    --image "lt-frontend:latest" \
     --file "$WIN_PROJECT_ROOT/app/frontend/Dockerfile" \
     --build-arg "VITE_GOOGLE_CLIENT_ID=$GOOGLE_CLIENT_ID" \
     "$WIN_PROJECT_ROOT/app/frontend/"
@@ -278,27 +310,46 @@ for i in "${!USERS[@]}"; do
     USER_ENV_VARS+=("AllowedUsers__${i}=${USERS[$i]}")
 done
 
-az containerapp create \
-    --name "$BACKEND_APP" \
-    --resource-group "$RESOURCE_GROUP" \
-    --environment "$ENVIRONMENT_NAME" \
-    --image "${ACR_NAME}.azurecr.io/lt-backend:latest" \
-    --registry-server "${ACR_NAME}.azurecr.io" \
-    --registry-username "$ACR_USERNAME" \
-    --registry-password "$ACR_PASSWORD" \
-    --target-port 8080 \
-    --ingress internal \
-    --allow-insecure \
-    --min-replicas 1 \
-    --max-replicas 1 \
-    --env-vars \
-        ASPNETCORE_ENVIRONMENT=Production \
-        StorageProvider=AzureBlob \
-        "AzureBlob__ContainerName=$BLOB_CONTAINER" \
-        "Gemini__Model=$GEMINI_MODEL" \
-        "Authentication__Google__ClientId=$GOOGLE_CLIENT_ID" \
-        "${USER_ENV_VARS[@]}" \
-    --output none
+BACKEND_IMAGE="${ACR_NAME}.azurecr.io/lt-backend:${IMAGE_TAG}"
+
+if az containerapp show --name "$BACKEND_APP" --resource-group "$RESOURCE_GROUP" --output none 2>/dev/null; then
+    echo "   Backend app exists — updating to $IMAGE_TAG..."
+    az containerapp update \
+        --name "$BACKEND_APP" \
+        --resource-group "$RESOURCE_GROUP" \
+        --image "$BACKEND_IMAGE" \
+        --set-env-vars \
+            ASPNETCORE_ENVIRONMENT=Production \
+            StorageProvider=AzureBlob \
+            "AzureBlob__ContainerName=$BLOB_CONTAINER" \
+            "Gemini__Model=$GEMINI_MODEL" \
+            "Authentication__Google__ClientId=$GOOGLE_CLIENT_ID" \
+            "${USER_ENV_VARS[@]}" \
+        --output none
+else
+    echo "   Creating backend app..."
+    az containerapp create \
+        --name "$BACKEND_APP" \
+        --resource-group "$RESOURCE_GROUP" \
+        --environment "$ENVIRONMENT_NAME" \
+        --image "$BACKEND_IMAGE" \
+        --registry-server "${ACR_NAME}.azurecr.io" \
+        --registry-username "$ACR_USERNAME" \
+        --registry-password "$ACR_PASSWORD" \
+        --target-port 8080 \
+        --ingress internal \
+        --allow-insecure \
+        --min-replicas 1 \
+        --max-replicas 1 \
+        --env-vars \
+            ASPNETCORE_ENVIRONMENT=Production \
+            StorageProvider=AzureBlob \
+            "AzureBlob__ContainerName=$BLOB_CONTAINER" \
+            "Gemini__Model=$GEMINI_MODEL" \
+            "Authentication__Google__ClientId=$GOOGLE_CLIENT_ID" \
+            "${USER_ENV_VARS[@]}" \
+        --output none
+fi
 
 # Enable managed identity
 az containerapp identity assign \
@@ -351,48 +402,71 @@ BACKEND_FQDN=$(azq containerapp show \
     --resource-group "$RESOURCE_GROUP" \
     --query "properties.configuration.ingress.fqdn" -o tsv)
 
-az containerapp create \
-    --name "$FRONTEND_APP" \
-    --resource-group "$RESOURCE_GROUP" \
-    --environment "$ENVIRONMENT_NAME" \
-    --image "${ACR_NAME}.azurecr.io/lt-frontend:latest" \
-    --registry-server "${ACR_NAME}.azurecr.io" \
-    --registry-username "$ACR_USERNAME" \
-    --registry-password "$ACR_PASSWORD" \
-    --target-port 80 \
-    --ingress external \
-    --min-replicas 1 \
-    --max-replicas 1 \
-    --env-vars \
-        "BACKEND_HOST=$BACKEND_FQDN" \
-        "BACKEND_PORT=80" \
-        "BACKEND_SCHEME=http" \
-    --output none
+FRONTEND_IMAGE="${ACR_NAME}.azurecr.io/lt-frontend:${IMAGE_TAG}"
+
+if az containerapp show --name "$FRONTEND_APP" --resource-group "$RESOURCE_GROUP" --output none 2>/dev/null; then
+    echo "   Frontend app exists — updating to $IMAGE_TAG..."
+    az containerapp update \
+        --name "$FRONTEND_APP" \
+        --resource-group "$RESOURCE_GROUP" \
+        --image "$FRONTEND_IMAGE" \
+        --set-env-vars \
+            "BACKEND_HOST=$BACKEND_FQDN" \
+            "BACKEND_PORT=80" \
+            "BACKEND_SCHEME=http" \
+        --output none
+else
+    echo "   Creating frontend app..."
+    az containerapp create \
+        --name "$FRONTEND_APP" \
+        --resource-group "$RESOURCE_GROUP" \
+        --environment "$ENVIRONMENT_NAME" \
+        --image "$FRONTEND_IMAGE" \
+        --registry-server "${ACR_NAME}.azurecr.io" \
+        --registry-username "$ACR_USERNAME" \
+        --registry-password "$ACR_PASSWORD" \
+        --target-port 80 \
+        --ingress external \
+        --min-replicas 1 \
+        --max-replicas 1 \
+        --env-vars \
+            "BACKEND_HOST=$BACKEND_FQDN" \
+            "BACKEND_PORT=80" \
+            "BACKEND_SCHEME=http" \
+        --output none
+fi
 
 # ---------------------------------------------------------------------------
 # Step 9: Deploy Worker as Scheduled Job
 # ---------------------------------------------------------------------------
 echo ">> Step 9: Deploying worker job..."
 
-az containerapp job create \
-    --name "$WORKER_JOB" \
-    --resource-group "$RESOURCE_GROUP" \
-    --environment "$ENVIRONMENT_NAME" \
-    --image "${ACR_NAME}.azurecr.io/lt-worker:latest" \
-    --registry-server "${ACR_NAME}.azurecr.io" \
-    --registry-username "$ACR_USERNAME" \
-    --registry-password "$ACR_PASSWORD" \
-    --trigger-type Schedule \
-    --cron-expression "*/5 * * * *" \
-    --replica-timeout 300 \
-    --parallelism 1 \
-    --replica-retry-limit 0 \
-    --env-vars \
-        DOTNET_ENVIRONMENT=Production \
-        StorageProvider=AzureBlob \
-        "AzureBlob__ContainerName=$BLOB_CONTAINER" \
-        "Gemini__Model=$GEMINI_MODEL" \
-    --output none
+WORKER_IMAGE="${ACR_NAME}.azurecr.io/lt-worker:${IMAGE_TAG}"
+
+if az containerapp job show --name "$WORKER_JOB" --resource-group "$RESOURCE_GROUP" --output none 2>/dev/null; then
+    echo "   Worker job exists — will be updated via YAML below with $IMAGE_TAG"
+else
+    echo "   Creating worker job..."
+    az containerapp job create \
+        --name "$WORKER_JOB" \
+        --resource-group "$RESOURCE_GROUP" \
+        --environment "$ENVIRONMENT_NAME" \
+        --image "$WORKER_IMAGE" \
+        --registry-server "${ACR_NAME}.azurecr.io" \
+        --registry-username "$ACR_USERNAME" \
+        --registry-password "$ACR_PASSWORD" \
+        --trigger-type Schedule \
+        --cron-expression "*/5 * * * *" \
+        --replica-timeout 300 \
+        --parallelism 1 \
+        --replica-retry-limit 0 \
+        --env-vars \
+            DOTNET_ENVIRONMENT=Production \
+            StorageProvider=AzureBlob \
+            "AzureBlob__ContainerName=$BLOB_CONTAINER" \
+            "Gemini__Model=$GEMINI_MODEL" \
+        --output none
+fi
 
 # Enable managed identity on worker job
 az containerapp job identity assign \
@@ -447,7 +521,7 @@ properties:
   template:
     containers:
       - name: ${WORKER_JOB}
-        image: ${ACR_NAME}.azurecr.io/lt-worker:latest
+        image: ${ACR_NAME}.azurecr.io/lt-worker:${IMAGE_TAG}
         env:
           - name: DOTNET_ENVIRONMENT
             value: Production
@@ -481,10 +555,11 @@ FRONTEND_FQDN=$(azq containerapp show \
 
 echo ""
 echo "============================================"
-echo "Deployment complete!"
+echo "Deployment complete!  Version: $IMAGE_TAG"
 echo "============================================"
 echo ""
 echo "Frontend URL:  https://$FRONTEND_FQDN"
+echo "Image tag:     $IMAGE_TAG  (also tagged :latest)"
 echo ""
 echo "NEXT STEPS:"
 echo "  1. Go to Google Cloud Console > APIs & Services > Credentials"
