@@ -315,4 +315,28 @@ public class ProjectsController : ControllerBase
         if (!result) return NotFound();
         return NoContent();
     }
+
+    [HttpGet("{projectId}/jobs/{jobId}/files/{fileName}")]
+    public async Task<IActionResult> GetProjectJobFileAsync(Guid projectId, Guid jobId, string fileName, [FromQuery] bool download = false)
+    {
+        var userId = GetUserId();
+        if (string.IsNullOrEmpty(userId))
+            return BadRequest(new { error = "InvalidToken", message = "Could not extract user ID from token." });
+
+        var (bytes, contentType, error) = await _projectService.GetProjectJobFileAsync(userId, projectId, jobId, fileName);
+
+        return error switch
+        {
+            "InvalidFileName" => BadRequest(new { error = "InvalidFileName", message = "File name contains invalid characters." }),
+            "NotFound" => NotFound(),
+            "Forbidden" => Forbid(),
+            _ => ServeFile(bytes!, contentType!, fileName, download)
+        };
+    }
+
+    private IActionResult ServeFile(byte[] bytes, string contentType, string fileName, bool download)
+    {
+        Response.Headers["X-Content-Type-Options"] = "nosniff";
+        return download ? File(bytes, contentType, fileName) : File(bytes, contentType);
+    }
 }

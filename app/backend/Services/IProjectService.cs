@@ -26,4 +26,6 @@ public interface IProjectService
     // error: null on success | "NotFound" | "Forbidden" | "Conflict" | "InvalidMode"
     Task<(JobMetadata? metadata, string? error)> CreateProjectJobVersionAsync(string userId, Guid projectId, Guid jobId, CreateVersionRequest request);
     Task<bool> RevertProjectJobVersionAsync(string userId, Guid projectId, Guid jobId);
+
+    Task<(byte[]? bytes, string? contentType, string? error)> GetProjectJobFileAsync(string userId, Guid projectId, Guid jobId, string fileName);
 }

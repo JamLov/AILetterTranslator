@@ -701,5 +701,72 @@ public class JobsControllerTests
     }
 
     #endregion
+
+    #region GetFileAsync
+
+    [Fact]
+    public async Task GetFileAsync_WhenUserIdMissing_ReturnsBadRequest()
+    {
+        SetUserContext("user@example.com", null!);
+
+        var result = await _controller.GetFileAsync(Guid.NewGuid(), "test.jpg");
+
+        Assert.IsType<BadRequestObjectResult>(result);
+    }
+
+    [Fact]
+    public async Task GetFileAsync_WhenFileNameInvalid_ReturnsBadRequest()
+    {
+        SetUserContext("user@example.com", "user-1");
+        _dataServiceMock.Setup(s => s.GetFileAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string>()))
+            .ReturnsAsync((null, null, "InvalidFileName"));
+
+        var result = await _controller.GetFileAsync(Guid.NewGuid(), "invalid<file>.jpg");
+
+        Assert.IsType<BadRequestObjectResult>(result);
+    }
+
+    [Fact]
+    public async Task GetFileAsync_WhenFileNotFound_ReturnsNotFound()
+    {
+        SetUserContext("user@example.com", "user-1");
+        _dataServiceMock.Setup(s => s.GetFileAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string>()))
+            .ReturnsAsync((null, null, "NotFound"));
+
+        var result = await _controller.GetFileAsync(Guid.NewGuid(), "missing.jpg");
+
+        Assert.IsType<NotFoundResult>(result);
+    }
+
+    [Fact]
+    public async Task GetFileAsync_WhenFileExists_ReturnsFileContent()
+    {
+        SetUserContext("user@example.com", "user-1");
+        var fileBytes = new byte[] { 1, 2, 3 };
+        _dataServiceMock.Setup(s => s.GetFileAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string>()))
+            .ReturnsAsync((fileBytes, "image/jpeg", (string?)null));
+
+        var result = await _controller.GetFileAsync(Guid.NewGuid(), "photo.jpg");
+
+        var fileResult = Assert.IsType<FileContentResult>(result);
+        fileResult.ContentType.Should().Be("image/jpeg");
+        fileResult.FileContents.Should().BeEquivalentTo(fileBytes);
+    }
+
+    [Fact]
+    public async Task GetFileAsync_WhenDownloadTrue_ReturnsFileWithFilename()
+    {
+        SetUserContext("user@example.com", "user-1");
+        var fileBytes = new byte[] { 1, 2, 3 };
+        _dataServiceMock.Setup(s => s.GetFileAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string>()))
+            .ReturnsAsync((fileBytes, "image/jpeg", (string?)null));
+
+        var result = await _controller.GetFileAsync(Guid.NewGuid(), "photo.jpg", download: true);
+
+        var fileResult = Assert.IsType<FileContentResult>(result);
+        fileResult.FileDownloadName.Should().Be("photo.jpg");
+    }
+
+    #endregion
 }
 

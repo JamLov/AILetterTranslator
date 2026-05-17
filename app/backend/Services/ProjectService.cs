@@ -669,4 +669,30 @@ public class ProjectService : IProjectService
         _logger.LogInformation("Reverted project job {JobId} to v{Target}", jobId, revertTo);
         return true;
     }
+
+    public async Task<(byte[]? bytes, string? contentType, string? error)> GetProjectJobFileAsync(string userId, Guid projectId, Guid jobId, string fileName)
+    {
+        if (!FileNameValidator.IsSafeFileName(fileName))
+            return (null, null, "InvalidFileName");
+
+        var contentType = FileNameValidator.GetImageContentType(fileName);
+        if (contentType == null)
+            return (null, null, "InvalidFileName");
+
+        var project = await ReadProjectMetadataAsync(projectId);
+        if (project == null)
+            return (null, null, "NotFound");
+
+        var (isOwner, isMember) = GetUserRole(project, userId);
+        if (!isOwner && !isMember)
+            return (null, null, "Forbidden");
+
+        var jobPath = GetProjectJobPath(projectId, jobId);
+        var filePath = Path.Combine(jobPath, "files", fileName);
+        if (!await _storageService.FileExistsAsync(filePath))
+            return (null, null, "NotFound");
+
+        var bytes = await _storageService.ReadBytesAsync(filePath);
+        return (bytes, contentType, null);
+    }
 }

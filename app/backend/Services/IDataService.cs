@@ -33,5 +33,7 @@ public interface IDataService
     Task<(JobMetadata? metadata, string? error)> CreateJobVersionAsync(string userId, Guid jobId, CreateVersionRequest request);
 
     Task<bool> RevertJobVersionAsync(string userId, Guid jobId);
+
+    Task<(byte[]? bytes, string? contentType, string? error)> GetFileAsync(string userId, Guid jobId, string fileName);
 }
 

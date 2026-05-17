@@ -301,4 +301,29 @@ public class JobsController : ControllerBase
         if (!result) return NotFound();
         return NoContent();
     }
+
+    [HttpGet("{jobId}/files/{fileName}")]
+    public async Task<IActionResult> GetFileAsync(Guid jobId, string fileName, [FromQuery] bool download = false)
+    {
+        var subClaim = User.FindFirst(ClaimTypes.NameIdentifier) ?? User.FindFirst("sub");
+        var userId = subClaim?.Value;
+
+        if (string.IsNullOrEmpty(userId))
+            return BadRequest(new { error = "InvalidToken", message = "Could not extract user ID from token." });
+
+        var (bytes, contentType, error) = await _dataService.GetFileAsync(userId, jobId, fileName);
+
+        return error switch
+        {
+            "InvalidFileName" => BadRequest(new { error = "InvalidFileName", message = "File name contains invalid characters." }),
+            "NotFound" => NotFound(),
+            _ => ServeFile(bytes!, contentType!, fileName, download)
+        };
+    }
+
+    private IActionResult ServeFile(byte[] bytes, string contentType, string fileName, bool download)
+    {
+        Response.Headers["X-Content-Type-Options"] = "nosniff";
+        return download ? File(bytes, contentType, fileName) : File(bytes, contentType);
+    }
 }
