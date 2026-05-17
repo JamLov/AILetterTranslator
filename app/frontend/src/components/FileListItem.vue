@@ -97,10 +97,11 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <li class="file-item" @mouseenter="onMouseEnter" @mouseleave="onMouseLeave" @click="onClick">
+  <li class="file-item" @mouseenter="onMouseEnter" @mouseleave="onMouseLeave" @click="onClick" :title="fileName">
     <span class="file-item-name">{{ fileName }}</span>
     <Teleport to="body">
       <div v-if="showTooltip && imageUrl" ref="tooltipRef" class="file-preview-tooltip" :style="tooltipStyle">
+        <div class="file-preview-filename">{{ fileName }}</div>
         <img :src="imageUrl" :alt="fileName" />
       </div>
       <div v-if="showTooltip && isLoading" class="file-preview-tooltip" :style="tooltipStyle">
@@ -114,14 +115,15 @@ onUnmounted(() => {
 .file-item {
   cursor: pointer;
   padding: 4px 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .file-item:hover {
   color: var(--color-primary);
 }
 .file-item-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  display: inline;
 }
 </style>
 
@@ -150,5 +152,12 @@ onUnmounted(() => {
   text-align: center;
   color: var(--color-text-secondary);
   font-size: 0.85em;
+}
+.file-preview-filename {
+  padding: 2px 4px 6px;
+  font-size: 0.8em;
+  color: var(--color-text-secondary);
+  word-break: break-all;
+  text-align: center;
 }
 </style>

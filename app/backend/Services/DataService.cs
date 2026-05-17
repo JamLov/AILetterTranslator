@@ -22,7 +22,7 @@ public class DataService : IDataService
         _logger = logger;
         _timeProvider = timeProvider;
         _versionOperations = versionOperations;
-        _markdownPipeline = new MarkdownPipelineBuilder().UseAdvancedExtensions().Build();
+        _markdownPipeline = new MarkdownPipelineBuilder().UseAdvancedExtensions().DisableHtml().Build();
     }
 
     private string GetJobDirectoryPath(string userId, Guid jobId)

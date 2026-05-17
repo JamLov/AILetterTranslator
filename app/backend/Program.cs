@@ -1,3 +1,4 @@
+using LetterTranslation.Api.Filters;
 using LetterTranslation.Api.Services;
 using LetterTranslation.Shared.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -14,7 +15,10 @@ Log.Logger = new LoggerConfiguration()
 builder.Host.UseSerilog();
 
 // Add services to the container.
-builder.Services.AddControllers();
+builder.Services.AddControllers(options =>
+{
+    options.Filters.Add<AllowedUserFilter>();
+});
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddScoped<IUserService, UserService>();
 builder.Services.AddScoped<VersionOperations>();
