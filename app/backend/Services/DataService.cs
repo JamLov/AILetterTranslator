@@ -500,4 +500,25 @@ public class DataService : IDataService
         _logger.LogInformation("Reverted job {JobId} to v{Target}", jobId, revertTo);
         return true;
     }
+
+    public async Task<(byte[]? bytes, string? contentType, string? error)> GetFileAsync(string userId, Guid jobId, string fileName)
+    {
+        if (!FileNameValidator.IsSafeFileName(fileName))
+            return (null, null, "InvalidFileName");
+
+        var contentType = FileNameValidator.GetImageContentType(fileName);
+        if (contentType == null)
+            return (null, null, "InvalidFileName");
+
+        var jobDir = GetJobDirectoryPath(userId, jobId);
+        if (!await _storageService.DirectoryExistsAsync(jobDir))
+            return (null, null, "NotFound");
+
+        var filePath = Path.Combine(jobDir, "files", fileName);
+        if (!await _storageService.FileExistsAsync(filePath))
+            return (null, null, "NotFound");
+
+        var bytes = await _storageService.ReadBytesAsync(filePath);
+        return (bytes, contentType, null);
+    }
 }

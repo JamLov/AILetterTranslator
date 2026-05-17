@@ -2,6 +2,8 @@
 import { ref, computed, onMounted, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { api } from '../api';
+import FileListItem from '../components/FileListItem.vue'
+import ImagePreviewModal from '../components/ImagePreviewModal.vue'
 
 interface JobMetadata {
   jobId: string;
@@ -69,6 +71,17 @@ const editedMarkdown = ref('');
 const editedNotes = ref('');
 const isCreatingVersion = ref(false);
 const isLoadingSource = ref(false);
+
+const previewIndex = ref<number | null>(null)
+
+function openPreview(fileName: string, _imageUrl: string) {
+  const idx = job.value?.originalFileNames.indexOf(fileName) ?? -1
+  if (idx >= 0) previewIndex.value = idx
+}
+
+function closePreview() {
+  previewIndex.value = null
+}
 const createVersionError = ref<string | null>(null);
 
 // Derived state
@@ -508,7 +521,14 @@ onMounted(async () => {
           <div class="sidebar-block card">
             <h3 class="sidebar-heading">Files</h3>
             <ul class="file-list">
-              <li v-for="name in job.originalFileNames" :key="name">{{ name }}</li>
+              <FileListItem
+                v-for="name in job.originalFileNames"
+                :key="name"
+                :file-name="name"
+                :job-id="job.metadata.jobId"
+                :project-id="projectId ?? undefined"
+                @preview="openPreview"
+              />
             </ul>
           </div>
           <div v-if="job.notes" class="sidebar-block card">
@@ -657,6 +677,15 @@ onMounted(async () => {
         </div>
       </div>
     </div>
+    <ImagePreviewModal
+      v-if="previewIndex != null && job"
+      :file-names="job.originalFileNames"
+      :current-index="previewIndex"
+      :job-id="job.metadata.jobId"
+      :project-id="projectId ?? undefined"
+      @close="closePreview"
+      @navigate="(idx: number) => previewIndex = idx"
+    />
   </div>
 </template>
 
