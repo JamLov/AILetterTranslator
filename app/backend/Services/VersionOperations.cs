@@ -44,7 +44,7 @@ public class VersionOperations
         _storage = storage;
         _timeProvider = timeProvider;
         _logger = logger;
-        _markdownPipeline = new MarkdownPipelineBuilder().UseAdvancedExtensions().Build();
+        _markdownPipeline = new MarkdownPipelineBuilder().UseAdvancedExtensions().DisableHtml().Build();
     }
 
     public static bool IsValidEditMode(string? mode) =>

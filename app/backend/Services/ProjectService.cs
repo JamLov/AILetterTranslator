@@ -35,7 +35,7 @@ public class ProjectService : IProjectService
         _logger = logger;
         _timeProvider = timeProvider;
         _versionOperations = versionOperations;
-        _markdownPipeline = new MarkdownPipelineBuilder().UseAdvancedExtensions().Build();
+        _markdownPipeline = new MarkdownPipelineBuilder().UseAdvancedExtensions().DisableHtml().Build();
     }
 
     private string GetProjectJobPath(Guid projectId, Guid jobId) =>

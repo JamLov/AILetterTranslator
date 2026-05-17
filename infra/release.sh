@@ -1,6 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# ---------------------------------------------------------------------------
+# Safety: only allow releases from main
+# ---------------------------------------------------------------------------
+CURRENT_BRANCH=$(git -C "$(dirname "${BASH_SOURCE[0]}")/.." rev-parse --abbrev-ref HEAD)
+if [[ "$CURRENT_BRANCH" != "main" ]]; then
+    echo "ERROR: Releases must be run from 'main'. Currently on '$CURRENT_BRANCH'."
+    exit 1
+fi
+
 # ============================================================================
 # release.sh — Build new container images and roll them out via Terraform.
 #

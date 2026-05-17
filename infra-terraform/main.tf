@@ -36,11 +36,8 @@ resource "azurerm_storage_account" "main" {
   account_tier             = "Standard"
   account_replication_type = "LRS"
 
-  # Match what `az storage account create` produced. TODO: consider raising
-  # min_tls_version to TLS1_2 and lowering allow_nested_items_to_be_public
-  # in a follow-up — but do it as an explicit change, not a "drifted from
-  # default" surprise.
-  min_tls_version                 = "TLS1_0"
+  # Enforce TLS 1.2 minimum for storage account connections.
+  min_tls_version             = "TLS1_2"
   allow_nested_items_to_be_public = false
 }
 
